@@ -269,16 +269,26 @@ class FloatingWindow(QMainWindow):
     def update_result(self, text):
         """更新结果文本"""
         self.result_text.append(text)
-        self.logger.info(f"Transcription result: {text}")
+        self.logger.info(f"转写结果: {text}")
         
         # 将文本输出到当前光标位置
         try:
             from platform_specific.input import TextInput
             text_input = TextInput()
-            text_input.insert_text(text)
-            self.logger.debug("Text inserted at cursor position")
+            
+            # 获取当前窗口
+            current_window = text_input.get_focused_window()
+            self.logger.debug(f"当前焦点窗口: {current_window}")
+            
+            # 尝试所有可用方法输入文本
+            result = text_input.insert_text(text)
+            if result:
+                self.logger.debug("文本插入成功")
+            else:
+                self.logger.error("无法插入文本到当前窗口")
+                
         except Exception as e:
-            self.logger.error(f"Failed to insert text: {e}")
+            self.logger.error(f"插入文本过程中出错: {e}")
         
     def update_audio_level(self, level):
         """更新音频电平"""

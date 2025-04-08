@@ -60,36 +60,57 @@ def main():
             
             # 创建临时文件用于实时转写
             temp_file = "temp_recording.wav"
-            transcription_interval = 2.0  # 每2秒转写一次
+            transcription_interval = 1.0  # 每1秒转写一次
+            
+            # 连续语音检测变量
+            continuous_audio_count = 0
+            min_audio_level_threshold = 5  # 最小音频电平阈值
+            continuous_audio_threshold = 3  # 连续检测到声音的次数阈值
             
             while is_recording and (time.time() - start_time) < timeout:
                 try:
                     # 获取音频电平
                     level = recorder.get_audio_level()
-                    if level > 0:  # 只更新有声音时的电平
-                        logger.debug(f"Audio level: {level}")
-                        window.update_audio_level(level)
+                    window.update_audio_level(level)
+                    
+                    # 检测连续语音
+                    if level > min_audio_level_threshold:
+                        continuous_audio_count += 1
+                        logger.debug(f"Audio level: {level}, continuous count: {continuous_audio_count}")
+                    else:
+                        continuous_audio_count = max(0, continuous_audio_count - 1)  # 逐渐减少计数
+                    
+                    # 判断是否需要进行转写
+                    current_time = time.time()
+                    should_transcribe = False
+                    
+                    # 固定间隔转写
+                    if current_time - last_transcribe_time >= transcription_interval:
+                        should_transcribe = True
                         
-                        # 判断是否需要进行转写
-                        current_time = time.time()
-                        if current_time - last_transcribe_time >= transcription_interval:
-                            last_transcribe_time = current_time
-                            
-                            # 保存当前录音片段
-                            if recorder.save_recording(temp_file):
-                                # 转写当前片段
-                                window.status_label.setText("Transcribing...")
-                                try:
-                                    logger.debug("Starting transcription")
-                                    text = engine.transcribe(temp_file)
-                                    if text.strip():
-                                        logger.debug(f"Transcription result: {text}")
-                                        window.update_result(text)
-                                        window.status_label.setText("Recording...")
-                                except Exception as e:
-                                    logger.error(f"Transcription failed: {e}")
-                            else:
-                                logger.warning("Failed to save recording for transcription")
+                    # 连续语音触发转写
+                    if continuous_audio_count >= continuous_audio_threshold:
+                        should_transcribe = True
+                        continuous_audio_count = 0  # 重置计数
+                        
+                    if should_transcribe:
+                        last_transcribe_time = current_time
+                        
+                        # 保存当前录音片段
+                        if recorder.save_recording(temp_file):
+                            # 转写当前片段
+                            window.status_label.setText("转写中...")
+                            try:
+                                logger.debug("Starting transcription")
+                                text = engine.transcribe(temp_file)
+                                if text.strip() and text != "请说话...":
+                                    logger.debug(f"Transcription result: {text}")
+                                    window.update_result(text)
+                                    window.status_label.setText("Recording...")
+                            except Exception as e:
+                                logger.error(f"Transcription failed: {e}")
+                        else:
+                            logger.warning("Failed to save recording for transcription")
                     
                     # 等待一小段时间
                     time.sleep(0.05)  # 保持波形流畅
