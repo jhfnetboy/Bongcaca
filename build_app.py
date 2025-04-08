@@ -247,7 +247,6 @@ def build_macos():
         "--clean",
         *icon_param,
         "--osx-bundle-identifier=com.bongcaca.voicetyper",
-        "--target-architecture=universal2",
         "--add-data=resources:resources",
         "main.py"
     ]

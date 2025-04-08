@@ -193,6 +193,12 @@
 - 优化：重构临时文件处理方式，增加安全检查和清理
 - 技术改进：优化segments和info对象的生命周期管理，避免悬挂引用
 
+## 2024-04-10 (0.23.35)
+- 修复：解决macOS构建应用时出现的`_struct.cpython-311-darwin.so is not a fat binary!`错误
+- 优化：移除PyInstaller构建参数中的`--target-architecture=universal2`，以兼容conda环境
+- 改进：构建脚本现在可以在conda环境中正常工作，生成适用于当前架构的应用程序
+- 注意：如需构建通用二进制(Intel/Apple Silicon)，请使用系统Python而非conda环境
+
 ## 初始化安装步骤
 
 1. 安装 Homebrew（如果没有）
