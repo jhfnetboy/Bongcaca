@@ -9,6 +9,7 @@ import tempfile
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
+import time
 
 # 设置环境变量以避免OpenMP冲突
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -287,33 +288,44 @@ class WhisperEngine:
             
             self.logger.info(f"Transcribing audio file: {audio_file}")
             
-            # 转写音频
-            beam_size = self.settings.get("beam_size", 5)
-            segments, info = self.model.transcribe(
-                audio_file,
-                beam_size=beam_size,
-                language="zh",
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500)
-            )
-            
-            # 记录语言检测结果
-            self.logger.info(f"Detected language: {info.language} (probability: {info.language_probability})")
-            
-            # 合并所有片段
-            transcript = ""
-            for segment in segments:
-                transcript += segment.text + " "
+            # 转写音频时捕获并安全释放资源
+            try:
+                # 转写音频
+                beam_size = self.settings.get("beam_size", 5)
+                segments, info = self.model.transcribe(
+                    audio_file,
+                    beam_size=beam_size,
+                    language="zh",
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
                 
-            # 清理文本
-            transcript = transcript.strip()
-            
-            # 校验结果是否为空或者广告内容
-            if not transcript or "感谢使用" in transcript:
-                self.logger.warning("转写结果为空或全是广告内容")
-                return "请说话..."
+                # 记录语言检测结果
+                self.logger.info(f"Detected language: {info.language} (probability: {info.language_probability})")
                 
-            return transcript
+                # 立即收集所有片段文本并释放segments引用，防止内存访问错误
+                transcript = ""
+                for segment in segments:
+                    transcript += segment.text + " "
+                    
+                # 显式删除segments和info，避免后续访问可能导致的内存错误
+                del segments
+                del info
+                
+                # 清理文本
+                transcript = transcript.strip()
+                
+                # 校验结果是否为空或者广告内容
+                if not transcript or "感谢使用" in transcript:
+                    self.logger.warning("转写结果为空或全是广告内容")
+                    return "请说话..."
+                    
+                return transcript
+            except Exception as e:
+                self.logger.error(f"转写音频过程中出错: {str(e)}")
+                # 捕获内部错误但继续抛出
+                raise
+                
         except Exception as e:
             self.logger.error(f"转写过程中出错: {str(e)}")
             return f"错误：{str(e)}"
@@ -341,57 +353,66 @@ class WhisperEngine:
                 return None
                 
             # 将缓冲区数据保存为临时文件
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                temp_file_path = temp_file.name
+            temp_file_path = None
+            try:
+                # 使用更安全的方式处理临时文件
+                temp_dir = tempfile.gettempdir()
+                temp_file_path = os.path.join(temp_dir, f"whisper_temp_{int(time.time()*1000)}.wav")
                 
-                try:
-                    # 写入WAV头
-                    import wave
-                    wf = wave.open(temp_file_path, 'wb')
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)  # 16-bit
-                    wf.setframerate(16000)
-                    
-                    # 合并所有缓冲区数据
-                    all_audio_data = b''.join(self.buffer)
-                    wf.writeframes(all_audio_data)
-                    wf.close()
-                    
-                    # 转写临时文件
-                    beam_size = self.settings.get("beam_size", 5)
-                    segments, info = self.model.transcribe(
-                        temp_file_path,
-                        beam_size=3,  # 使用较小的beam size以提高速度
-                        language="zh",
-                        vad_filter=True,
-                        vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
-                        word_timestamps=False,  # 不需要单词级时间戳
-                        condition_on_previous_text=True,  # 利用上下文改善实时体验
-                        no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
-                    )
-                    
-                    # 提取文本
-                    transcript = ""
-                    for segment in segments:
-                        transcript += segment.text + " "
-                    
-                    transcript = transcript.strip()
-                    
-                    # 结果处理
-                    if not transcript:
-                        return None
-                        
-                    return transcript
-                except Exception as e:
-                    self.logger.error(f"实时转写音频文件处理过程中出错: {str(e)}")
+                # 写入WAV头
+                import wave
+                wf = wave.open(temp_file_path, 'wb')
+                wf.setnchannels(1)
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(16000)
+                
+                # 创建并写入缓冲区数据的副本，避免原始数据被修改
+                buffer_copy = self.buffer.copy()
+                all_audio_data = b''.join(buffer_copy)
+                wf.writeframes(all_audio_data)
+                wf.close()
+                
+                # 转写临时文件
+                beam_size = self.settings.get("beam_size", 5)
+                segments, info = self.model.transcribe(
+                    temp_file_path,
+                    beam_size=3,  # 使用较小的beam size以提高速度
+                    language="zh",
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
+                    word_timestamps=False,  # 不需要单词级时间戳
+                    condition_on_previous_text=True,  # 利用上下文改善实时体验
+                    no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
+                )
+                
+                # 立即提取文本并释放segments引用
+                transcript = ""
+                for segment in segments:
+                    transcript += segment.text + " "
+                
+                # 显式释放资源
+                del segments
+                del info
+                del buffer_copy
+                
+                transcript = transcript.strip()
+                
+                # 结果处理
+                if not transcript:
                     return None
-                finally:
-                    # 确保临时文件被删除
+                    
+                return transcript
+            except Exception as e:
+                self.logger.error(f"实时转写音频文件处理过程中出错: {str(e)}")
+                return None
+            finally:
+                # 确保临时文件被删除
+                if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.unlink(temp_file_path)
-                    except:
-                        pass
-                    
+                    except Exception as cleanup_err:
+                        self.logger.warning(f"无法删除临时文件: {cleanup_err}")
+                
         except Exception as e:
             self.logger.error(f"实时转写过程中出错: {str(e)}")
             return None 

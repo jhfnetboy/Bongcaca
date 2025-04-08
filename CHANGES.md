@@ -186,6 +186,13 @@
 - 优化：不再默认自动输入文本，避免干扰用户当前操作
 - 改进：添加更友好的状态提示，清晰显示可用的粘贴快捷键
 
+## 2024-04-10 (0.23.34)
+- 改进：记住上次选择的模型，下次启动时自动选择
+- 修复：解决某些系统上转写完成后出现segmentation fault崩溃的问题
+- 优化：改进转写引擎内存管理，增强释放资源的机制
+- 优化：重构临时文件处理方式，增加安全检查和清理
+- 技术改进：优化segments和info对象的生命周期管理，避免悬挂引用
+
 ## 初始化安装步骤
 
 1. 安装 Homebrew（如果没有）
@@ -249,7 +256,7 @@ conda install -c conda-forge pyside6
 
 conda activate voice_typer && python main.py
 
-hello Hello   我们再试试 当前传口是Cursor 我们转写完之后 输入到Cursor
+
 
 https://huggingface.co/Systran/faster-whisper-base
 https://huggingface.co/Systran/faster-whisper-small

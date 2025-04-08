@@ -526,6 +526,16 @@ class FloatingWindow(QMainWindow):
             self.model_combo.clear()
             self.available_models = []
             
+            # 从配置中获取上次选择的模型
+            last_model = None
+            try:
+                if self.config:
+                    last_model = self.config.get("last_model")
+                    if last_model:
+                        self.logger.info(f"找到上次使用的模型: {last_model}")
+            except Exception as e:
+                self.logger.error(f"读取上次模型设置失败: {e}")
+            
             # 检查模型目录
             model_paths = [
                 ("large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")),
@@ -571,10 +581,23 @@ class FloatingWindow(QMainWindow):
                     if model not in self.available_models:
                         self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
                 
-                # 设置第一个模型为默认选择
-                self.model_combo.setCurrentIndex(0)
+                # 首先尝试设置上次使用的模型
+                selected_index = 0  # 默认使用第一个
+                if last_model and last_model in self.available_models:
+                    # 查找上次使用的模型的索引
+                    for i in range(self.model_combo.count()):
+                        if self.model_combo.itemData(i) == last_model:
+                            selected_index = i
+                            break
+                    self.logger.info(f"使用上次选择的模型: {last_model}")
+                else:
+                    self.logger.info(f"未找到上次模型或首次使用，使用默认模型: {found_models[0][0]}")
                 
-                self.result_text.append(f"已找到 {len(found_models)} 个已下载模型，默认使用: {found_models[0][0]}")
+                # 设置选中的模型
+                self.model_combo.setCurrentIndex(selected_index)
+                selected_model = self.model_combo.currentData()
+                
+                self.result_text.append(f"已找到 {len(found_models)} 个已下载模型，使用: {selected_model}")
             
             self.logger.info(f"模型列表初始化完成，找到 {len(found_models)} 个已下载模型")
         except Exception as e:
@@ -611,6 +634,15 @@ class FloatingWindow(QMainWindow):
             model_name = self.model_combo.currentData()
             if model_name:
                 self.logger.info(f"已选择模型: {model_name}")
+                
+                # 将当前选择的模型保存到配置
+                try:
+                    if self.config:
+                        self.config.set("last_model", model_name)
+                        self.logger.debug(f"已保存当前模型选择: {model_name}")
+                except Exception as e:
+                    self.logger.error(f"保存模型选择失败: {e}")
+                
                 # 发出模型改变信号
                 self.model_changed.emit(model_name)
             else:
