@@ -58,39 +58,16 @@ class WhisperEngine:
                 raise
     
     def download_model(self, model_name="large-v3"):
-        """检查模型是否存在，如果不存在则下载"""
+        """检查模型是否存在"""
         # 检查默认缓存路径
         default_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478")
         if os.path.exists(default_path):
             print(f"找到已下载的模型: {default_path}")
             return default_path
             
-        print(f"开始下载模型: {model_name}")
-        try:
-            # 使用 huggingface-cli 下载模型
-            import subprocess
-            cmd = [
-                "huggingface-cli",
-                "download",
-                "--resume-download",
-                f"Systran/faster-whisper-{model_name}",
-                "--local-dir",
-                os.path.dirname(os.path.dirname(default_path)),
-                "--local-dir-use-symlinks",
-                "False"
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"下载失败: {result.stderr}")
-                return None
-                
-            print(f"模型 {model_name} 下载完成")
-            return default_path
-            
-        except Exception as e:
-            print(f"下载模型 {model_name} 失败: {str(e)}")
-            return None
+        print("未找到模型，请先使用以下命令下载模型：")
+        print("huggingface-cli download --resume-download Systran/faster-whisper-large-v3")
+        return None
     
     def transcribe(self, audio_file, language=None):
         """转写音频文件"""

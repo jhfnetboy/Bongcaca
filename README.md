@@ -920,3 +920,10 @@ if __name__ == "__main__":
 5. **懒加载模式**：减少启动时间，提高用户体验
 
 这种设计考虑了普通个人电脑的性能限制，提供了良好的平衡点，使语音识别既高效又精准，同时不会过度消耗系统资源。分发流程也考虑了不同平台的特性，确保用户安装体验流畅，同时正确获取所需权限。
+
+### 初始化
+模型下载
+用huggingface-cli工具下载
+
+huggingface-cli download --resume-download Systran/faster-whisper-large-v3，
+下载成功文件在～/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478                                        

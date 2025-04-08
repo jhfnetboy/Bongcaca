@@ -1,9 +1,9 @@
 import sys
 import os
 import signal
-from PySide6.QtWidgets import QApplication, QMessageBox, QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QApplication, QMessageBox, QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel, QTextEdit
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QKeyEvent
 from ui.floating_window import FloatingWindow
 from core.engine import WhisperEngine
 from core.recorder import AudioRecorder
@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("语音输入工具")
-        self.setGeometry(100, 100, 400, 300)
+        self.setGeometry(100, 100, 600, 400)
         
         # 创建中央部件
         central_widget = QWidget()
@@ -29,20 +29,68 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("正在初始化...")
         layout.addWidget(self.status_label)
         
-        # 添加按钮
-        self.start_button = QPushButton("开始录音")
-        self.start_button.clicked.connect(self.start_recording)
-        layout.addWidget(self.start_button)
+        # 添加录音控制按钮
+        self.record_button = QPushButton("▶️ 开始录音")
+        self.record_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 16px; padding: 10px;")
+        self.record_button.clicked.connect(self.toggle_recording)
+        layout.addWidget(self.record_button)
+        
+        # 添加结果显示区域
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
+        layout.addWidget(self.result_text)
         
         # 初始化应用组件
         self.config = Config()
         self.model_manager = ModelManager(self.config)
         self.engine = None
         self.recorder = None
+        self.is_recording = False
         
         # 检查模型
         self.check_model()
         
+    def keyPressEvent(self, event: QKeyEvent):
+        """处理键盘事件"""
+        if event.key() == Qt.Key_Space:
+            self.toggle_recording()
+            
+    def toggle_recording(self):
+        """切换录音状态"""
+        if not self.engine or not self.recorder:
+            return
+            
+        if not self.is_recording:
+            # 开始录音
+            self.is_recording = True
+            self.record_button.setText("⏹ 停止录音")
+            self.record_button.setStyleSheet("background-color: #f44336; color: white; font-size: 16px; padding: 10px;")
+            self.status_label.setText("正在录音...")
+            
+            # 开始录音
+            self.audio_file = self.recorder.record(5)  # 录制5秒
+            
+            # 停止录音
+            self.is_recording = False
+            self.record_button.setText("▶️ 开始录音")
+            self.record_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 16px; padding: 10px;")
+            self.status_label.setText("正在识别...")
+            
+            # 识别语音
+            segments, info = self.engine.transcribe(self.audio_file, word_timestamps=True)
+            
+            # 显示识别结果
+            result_text = f"检测到的语言: {info.language} (概率: {info.language_probability})\n\n"
+            for segment in segments:
+                result_text += f"[{segment['start']:.2f}s -> {segment['end']:.2f}s] {segment['text']}\n"
+                if 'words' in segment:
+                    for word in segment['words']:
+                        result_text += f"  [{word['start']:.2f}s -> {word['end']:.2f}s] {word['word']}\n"
+                result_text += "\n"
+                
+            self.result_text.setText(result_text)
+            self.status_label.setText("识别完成")
+            
     def check_model(self):
         """检查模型是否存在"""
         # 检查默认缓存路径
@@ -52,47 +100,11 @@ class MainWindow(QMainWindow):
             self.engine = WhisperEngine(default_path)
             self.recorder = AudioRecorder()
             self.status_label.setText("模型加载完成，可以开始录音")
-            self.start_button.setEnabled(True)
+            self.record_button.setEnabled(True)
             return
             
-        # 如果默认路径不存在，尝试下载
-        self.status_label.setText("未找到语音模型，正在下载...")
-        recommended_model = self.model_manager.get_recommended_model()
-        model_path = self.model_manager.download_model(recommended_model)
-            
-        if model_path:
-            self.engine = WhisperEngine(model_path)
-            self.recorder = AudioRecorder()
-            self.status_label.setText("模型加载完成，可以开始录音")
-            self.start_button.setEnabled(True)
-        else:
-            self.status_label.setText("模型加载失败，请检查网络连接")
-            self.start_button.setEnabled(False)
-            
-    def start_recording(self):
-        """开始录音"""
-        if not self.engine or not self.recorder:
-            return
-            
-        self.status_label.setText("正在录音...")
-        self.start_button.setEnabled(False)
-        
-        # 录制5秒
-        audio_file = self.recorder.record(5)
-        
-        self.status_label.setText("正在识别...")
-        segments, info = self.engine.transcribe(audio_file, word_timestamps=True)
-        
-        # 显示识别结果
-        result_text = f"检测到的语言: {info.language} (概率: {info.language_probability})\n"
-        for segment in segments:
-            result_text += f"[{segment['start']:.2f}s -> {segment['end']:.2f}s] {segment['text']}\n"
-            if 'words' in segment:
-                for word in segment['words']:
-                    result_text += f"  [{word['start']:.2f}s -> {word['end']:.2f}s] {word['word']}\n"
-                    
-        self.status_label.setText(result_text)
-        self.start_button.setEnabled(True)
+        self.status_label.setText("未找到语音模型，请先下载模型")
+        self.record_button.setEnabled(False)
         
     def closeEvent(self, event):
         """窗口关闭事件"""
