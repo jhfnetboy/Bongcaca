@@ -214,10 +214,11 @@ def run_recording_loop(window, engine, recorder, max_duration=300):
                 char_count = len(result)
                 chinese_char_count = sum(1 for char in result if '\u4e00' <= char <= '\u9fff')
                 
-                # 记录详细统计信息
+                # 计算详细统计信息
                 stats_msg = (
                     f"录音统计: 文件大小={file_size_mb:.2f}MB, 录音时长={recording_duration:.2f}秒, "
-                    f"转写时间={transcribe_time:.2f}秒, 字符数={char_count}, 中文字数={chinese_char_count}"
+                    f"转写时间={transcribe_time:.2f}秒, 字符数={char_count}, 中文字数={chinese_char_count}, "
+                    f"使用模型={engine.model_name}"
                 )
                 logger.info(stats_msg)
                 window.result_text.append(f"\n--- {stats_msg} ---\n")

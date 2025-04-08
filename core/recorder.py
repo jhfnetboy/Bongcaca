@@ -182,30 +182,71 @@ class AudioRecorder:
             
         self.is_recording = False
         
+        # 使用临时变量保存当前文件名
+        current_file = self.current_filename
+        
+        # 确保停止录音线程
         if self.recording_thread:
             try:
                 self.recording_thread.join(timeout=2.0)  # 设置超时时间
                 if self.recording_thread.is_alive():
                     self.logger.warning("Recording thread did not terminate properly")
-                self.recording_thread = None
             except Exception as e:
                 self.logger.error(f"Error joining recording thread: {e}")
+            finally:
+                self.recording_thread = None
             
+        # 安全关闭音频流
         if self.stream:
             try:
                 self.stream.stop_stream()
                 self.stream.close()
-                self.stream = None
             except Exception as e:
                 self.logger.error(f"Error closing audio stream: {e}")
+            finally:
+                self.stream = None
+        
+        # 使用锁保护帧操作并保存录音
+        try:
+            with self.lock:
+                if len(self.frames) > 0:
+                    frames_copy = list(self.frames)  # 创建帧数据的副本
+                    self.frames = []  # 清空原始帧列表
+                    self._save_recording_from_frames(frames_copy, current_file)
+                    return current_file
+                else:
+                    self.logger.warning("No frames recorded")
+                    return None
+        except Exception as e:
+            self.logger.error(f"Error in stop method: {e}")
+            return None
             
-        with self.lock:
-            if len(self.frames) > 0:
-                self._save_recording()
-                return self.current_filename
-            else:
-                self.logger.warning("No frames recorded")
-                return None
+    def _save_recording_from_frames(self, frames, filename):
+        """从帧列表保存录音到指定文件"""
+        try:
+            if not frames or len(frames) == 0:
+                self.logger.warning("No frames to save")
+                return False
+                
+            wf = wave.open(filename, 'wb')
+            wf.setnchannels(1)
+            wf.setsampwidth(self.pyaudio.get_sample_size(pyaudio.paInt16))
+            wf.setframerate(16000)
+            wf.writeframes(b''.join(frames))
+            wf.close()
+            self.logger.info(f"Recording saved to {filename}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving recording: {str(e)}")
+            return False
+    
+    def _save_recording(self):
+        """保存当前录音帧到文件"""
+        try:
+            return self._save_recording_from_frames(self.frames, self.current_filename)
+        except Exception as e:
+            self.logger.error(f"Error saving recording: {str(e)}")
+            return False
     
     def _record(self):
         try:
@@ -286,18 +327,6 @@ class AudioRecorder:
         except Exception as e:
             self.logger.error(f"Error during recording: {str(e)}")
             self.is_recording = False
-    
-    def _save_recording(self):
-        try:
-            wf = wave.open(self.current_filename, 'wb')
-            wf.setnchannels(1)
-            wf.setsampwidth(self.pyaudio.get_sample_size(pyaudio.paInt16))
-            wf.setframerate(16000)
-            wf.writeframes(b''.join(self.frames))
-            wf.close()
-            self.logger.info(f"Recording saved to {self.current_filename}")
-        except Exception as e:
-            self.logger.error(f"Error saving recording: {str(e)}")
     
     def get_audio_level(self):
         # 在未录音状态下生成一些随机的低电平值，确保波形显示可见
