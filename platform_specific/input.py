@@ -102,6 +102,29 @@ class TextInput:
         except Exception as e:
             self.logger.warning(f"激活窗口失败: {e}")
         
+        # 优先使用剪贴板方法（对输入法兼容性最好）
+        try:
+            # 保存原剪贴板内容
+            save_clipboard = subprocess.run('pbpaste', shell=True, capture_output=True, text=True).stdout
+            
+            # 设置新内容到剪贴板
+            set_clip_cmd = ["pbcopy"]
+            process = subprocess.Popen(set_clip_cmd, stdin=subprocess.PIPE)
+            process.communicate(text.encode('utf-8'))
+            
+            # 模拟Command+V
+            subprocess.run('osascript -e \'tell application "System Events" to keystroke "v" using command down\'', shell=True)
+            
+            # 恢复原剪贴板内容
+            time.sleep(0.3)
+            restore_process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+            restore_process.communicate(save_clipboard.encode('utf-8'))
+            
+            self.logger.debug(f"使用剪贴板方法插入文本成功: {text}")
+            return True
+        except Exception as e:
+            methods_tried.append(f"剪贴板方法失败: {e}")
+        
         # 方法1: PyAutoGUI
         try:
             import pyautogui
@@ -136,29 +159,6 @@ class TextInput:
             return True
         except Exception as e:
             methods_tried.append(f"AppleScript失败: {e}")
-            
-        # 方法3: pbpaste/pbcopy
-        try:
-            # 保存原剪贴板内容
-            save_clipboard = subprocess.run('pbpaste', shell=True, capture_output=True, text=True).stdout
-            
-            # 设置新内容到剪贴板
-            set_clip_cmd = ["pbcopy"]
-            process = subprocess.Popen(set_clip_cmd, stdin=subprocess.PIPE)
-            process.communicate(text.encode('utf-8'))
-            
-            # 模拟Command+V
-            subprocess.run('osascript -e \'tell application "System Events" to keystroke "v" using command down\'', shell=True)
-            
-            # 恢复原剪贴板内容
-            time.sleep(0.5)
-            restore_process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-            restore_process.communicate(save_clipboard.encode('utf-8'))
-            
-            self.logger.debug(f"使用剪贴板方法插入文本成功: {text}")
-            return True
-        except Exception as e:
-            methods_tried.append(f"剪贴板方法失败: {e}")
         
         # 所有方法都失败了
         error_msg = ", ".join(methods_tried)

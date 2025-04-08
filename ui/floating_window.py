@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame
-from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject, Slot
 from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont
 import numpy as np
 import logging
 import time
+import os
 from ui.logo import create_app_icon
 
 class AudioVisualizer(QWidget):
@@ -103,6 +104,7 @@ class FloatingWindow(QMainWindow):
     # 定义自定义信号
     toggle_recording_signal = Signal()
     transcription_mode_changed = Signal(str)  # 新增模式切换信号
+    model_changed = Signal(str)  # 新增模型切换信号
     
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -126,6 +128,7 @@ class FloatingWindow(QMainWindow):
         self.device_initialized = False
         self.is_recording = False
         self.transcription_mode = "batch"  # 默认是批量模式
+        self.available_models = []  # 可用模型列表
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -154,6 +157,46 @@ class FloatingWindow(QMainWindow):
         """)
         self.device_combo.currentIndexChanged.connect(self.on_device_changed)
         layout.addWidget(self.device_combo)
+        
+        # 添加模型选择框
+        model_label = QLabel("Select Model:")
+        model_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(model_label)
+        
+        self.model_combo = QComboBox()
+        self.model_combo.setStyleSheet("""
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QComboBox:disabled {
+                background-color: #f0f0f0;
+            }
+        """)
+        self.model_combo.currentIndexChanged.connect(self.on_model_changed)
+        layout.addWidget(self.model_combo)
+        
+        # 添加模型下载按钮
+        self.download_button = QPushButton("Download Model")
+        self.download_button.setStyleSheet("""
+            QPushButton {
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: #f0f0f0;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+            QPushButton:disabled {
+                background-color: #f0f0f0;
+                color: #a0a0a0;
+            }
+        """)
+        self.download_button.clicked.connect(self.on_download_model)
+        layout.addWidget(self.download_button)
         
         # 添加模式选择框
         mode_frame = QFrame()
@@ -226,7 +269,15 @@ class FloatingWindow(QMainWindow):
         self.setFixedSize(400, 600)
         
         # 初始化设备列表
-        QTimer.singleShot(500, self.init_device_list)  # 延迟初始化设备列表
+        self.init_device_list()
+        
+        # 初始化模型列表
+        self.init_model_list()
+        
+        # 创建定时器用于在非录音状态下更新波形
+        self.idle_timer = QTimer(self)
+        self.idle_timer.timeout.connect(self.update_idle_visualization)
+        self.idle_timer.start(100)  # 100毫秒更新一次
         
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Space:
@@ -395,6 +446,248 @@ class FloatingWindow(QMainWindow):
                 mode_desc = "实时模式 - 录音时实时转写"
                 
             self.status_label.setText(f"模式: {mode_desc}")
+
+    def init_model_list(self):
+        """初始化模型列表"""
+        try:
+            self.logger.info("正在检测已下载的模型...")
+            self.model_combo.clear()
+            self.available_models = []
+            
+            # 检查模型目录
+            model_paths = [
+                ("large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")),
+                ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
+                ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
+                ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
+                ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3"))
+            ]
+            
+            found_models = []
+            for model_name, model_path in model_paths:
+                if os.path.exists(model_path):
+                    self.logger.info(f"找到已下载的模型: {model_name} 在 {model_path}")
+                    found_models.append((model_name, model_path))
+                    self.available_models.append(model_name)
+                    self.model_combo.addItem(f"{model_name} (已下载)", model_name)
+            
+            # 如果没有找到已下载的模型，添加可下载选项
+            if not found_models:
+                self.logger.warning("未找到已下载的模型，请下载模型")
+                self.model_combo.addItem("请下载模型", None)
+                self.download_button.setEnabled(True)
+            else:
+                # 添加可下载的其他模型
+                self.model_combo.addItem("---可下载模型---", None)
+                available_to_download = ["large-v3", "medium", "small", "base", "distil-large-v3"]
+                for model in available_to_download:
+                    if model not in self.available_models:
+                        self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
+                
+                # 设置第一个模型为默认选择
+                self.model_combo.setCurrentIndex(0)
+                
+            self.logger.info(f"模型列表初始化完成，找到 {len(found_models)} 个已下载模型")
+        except Exception as e:
+            self.logger.error(f"初始化模型列表失败: {e}")
+            self.status_label.setText(f"初始化模型列表失败: {str(e)}")
+    
+    def on_model_changed(self, index):
+        """模型切换事件"""
+        if index >= 0:
+            model_name = self.model_combo.currentData()
+            if model_name:
+                self.logger.info(f"已选择模型: {model_name}")
+                # 发出模型改变信号
+                self.model_changed.emit(model_name)
+            else:
+                # 分隔符或未下载模型
+                self.download_button.setEnabled(True)
+    
+    def on_download_model(self):
+        """下载模型按钮事件"""
+        try:
+            # 获取当前选择的模型
+            current_index = self.model_combo.currentIndex()
+            model_name = self.model_combo.currentData()
+            
+            if not model_name or model_name in self.available_models:
+                # 如果未选择或已下载，则显示选择对话框
+                models_to_download = []
+                models_info = [
+                    ("base", "74MB - 较低质量", "https://huggingface.co/Systran/faster-whisper-base"),
+                    ("small", "244MB - 平衡质量", "https://huggingface.co/Systran/faster-whisper-small"),
+                    ("medium", "769MB - 高质量", "https://huggingface.co/Systran/faster-whisper-medium"),
+                    ("large-v3", "2.9GB - 最高质量", "https://huggingface.co/Systran/faster-whisper-large-v3"),
+                    ("distil-large-v3", "2.3GB - 较高质量", "https://huggingface.co/Systran/faster-distil-whisper-large-v3")
+                ]
+                
+                for name, info, url in models_info:
+                    if name not in self.available_models:
+                        models_to_download.append((name, info, url))
+                
+                if not models_to_download:
+                    QMessageBox.information(self, "已下载全部模型", "已下载所有可用模型！")
+                    return
+                
+                # 创建选择对话框
+                dialog = QMessageBox(self)
+                dialog.setWindowTitle("选择要下载的模型")
+                dialog.setText("请选择要下载的模型：\n(下载过程中程序可能会暂时无响应)")
+                
+                for idx, (name, info, _) in enumerate(models_to_download):
+                    dialog.addButton(f"{name} ({info})", QMessageBox.ButtonRole.ActionRole)
+                
+                dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+                
+                # 显示对话框并获取用户选择
+                result = dialog.exec()
+                
+                if result == QMessageBox.ButtonRole.RejectRole or result < 0:
+                    return
+                
+                # 获取选中的模型名称
+                selected_index = result
+                model_name = models_to_download[selected_index][0]
+            
+            # 检查是否正在录音
+            if self.is_recording:
+                QMessageBox.warning(self, "操作不允许", "请先停止录音，然后再下载模型！")
+                return
+            
+            # 禁用用户界面
+            self.toggle_button.setEnabled(False)
+            self.model_combo.setEnabled(False)
+            self.download_button.setEnabled(False)
+            self.status_label.setText(f"正在下载模型 {model_name}，请稍候...")
+            
+            # 模型下载是耗时操作，使用线程
+            import threading
+            download_thread = threading.Thread(target=self._download_model, args=(model_name,))
+            download_thread.daemon = True
+            download_thread.start()
+            
+        except Exception as e:
+            self.logger.error(f"下载模型过程中出错: {e}")
+            self.status_label.setText(f"下载模型失败: {str(e)}")
+            self.toggle_button.setEnabled(True)
+            self.model_combo.setEnabled(True)
+            self.download_button.setEnabled(True)
+    
+    def _download_model(self, model_name):
+        """在后台线程中下载模型"""
+        try:
+            self.logger.info(f"开始下载模型: {model_name}")
+            
+            # 构建下载命令
+            import subprocess
+            
+            model_repo = f"Systran/faster-whisper-{model_name}"
+            if model_name == "distil-large-v3":
+                model_repo = "Systran/faster-distil-whisper-large-v3"
+                
+            cmd = [
+                "huggingface-cli",
+                "download",
+                "--resume-download",
+                model_repo,
+                "--local-dir-use-symlinks",
+                "False"
+            ]
+            
+            self.logger.debug(f"执行命令: {' '.join(cmd)}")
+            
+            # 执行下载命令
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            # 在主线程中更新UI
+            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+            
+            if result.returncode == 0:
+                self.logger.info(f"模型 {model_name} 下载成功")
+                # 使用主线程更新UI
+                QTimer.singleShot(0, lambda: self.download_completed(True, model_name))
+            else:
+                self.logger.error(f"模型下载失败: {result.stderr}")
+                # 使用主线程更新UI
+                QTimer.singleShot(0, lambda: self.download_completed(False, result.stderr))
+                
+        except Exception as e:
+            self.logger.error(f"下载模型过程中出错: {e}")
+            # 在主线程中更新UI
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.download_completed(False, str(e)))
+    
+    @Slot(bool, str)
+    def download_completed(self, success, message):
+        """下载完成后的UI更新（在主线程中调用）"""
+        if success:
+            self.status_label.setText(f"模型下载成功！")
+            model_name = message  # message参数包含模型名称
+            
+            # 将刚下载的模型添加到已下载列表
+            if model_name not in self.available_models:
+                self.available_models.append(model_name)
+            
+            # 重新组织下拉框内容
+            current_index = self.model_combo.currentIndex()
+            self.model_combo.blockSignals(True)  # 阻止信号触发避免重复刷新
+            
+            # 保存当前选择的模型
+            current_model = self.model_combo.currentData()
+            
+            # 清空并重新填充下拉框
+            self.model_combo.clear()
+            
+            # 先添加所有已下载的模型
+            for model in ["large-v3", "medium", "small", "base", "distil-large-v3"]:
+                if model in self.available_models:
+                    self.model_combo.addItem(f"{model} (已下载)", model)
+            
+            # 添加分隔线
+            self.model_combo.addItem("---可下载模型---", None)
+            
+            # 添加未下载的模型
+            for model in ["large-v3", "medium", "small", "base", "distil-large-v3"]:
+                if model not in self.available_models:
+                    self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
+            
+            # 尝试恢复之前的选择
+            if current_model:
+                for i in range(self.model_combo.count()):
+                    if self.model_combo.itemData(i) == current_model:
+                        self.model_combo.setCurrentIndex(i)
+                        break
+            else:
+                # 如果之前没有选择，选择第一个模型
+                self.model_combo.setCurrentIndex(0)
+                
+            self.model_combo.blockSignals(False)  # 恢复信号
+            
+            # 显示成功消息
+            QMessageBox.information(self, "下载成功", f"模型 {model_name} 下载成功！\n应用将在重启后使用新模型。")
+            
+        else:
+            self.status_label.setText(f"模型下载失败: {message}")
+            QMessageBox.warning(self, "下载失败", f"模型下载失败: {message}")
+        
+        # 重新启用UI
+        self.toggle_button.setEnabled(True)
+        self.model_combo.setEnabled(True)
+        self.download_button.setEnabled(True)
+
+    def update_idle_visualization(self):
+        """在非录音状态下更新波形显示"""
+        if not self.is_recording and hasattr(self, 'visualizer'):
+            # 使用AudioRecorder的get_audio_level方法获取随机值
+            from core.recorder import AudioRecorder
+            recorder = getattr(self, '_temp_recorder', None)
+            if recorder is None:
+                recorder = AudioRecorder()
+                self._temp_recorder = recorder
+            
+            level = recorder.get_audio_level()
+            self.update_audio_level(level)
 
     class LogHandler(logging.Handler):
         def __init__(self, window):

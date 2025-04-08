@@ -25,53 +25,54 @@ class WhisperEngine:
         self.initialized = False
         self.buffer = []  # 用于实时转写的音频数据缓冲区
         self.buffer_size = 0  # 当前缓冲区大小(字节)
-        self._detect_models()
+        self.available_models = self._detect_models()
         
-    def _detect_models(self):
-        """检测已下载的模型"""
+    def _detect_models(self) -> List[Dict[str, Any]]:
+        """检测已下载的模型，返回可用模型列表"""
         self.logger.info("Detecting downloaded models...")
+        available_models = []
         
-        # 检查large-v3模型
-        large_v3_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")
-        if os.path.exists(large_v3_path):
-            self.logger.info(f"Found large-v3 model at: {large_v3_path}")
-            self.logger.info("Using large-v3 model")
-            return {
-                "model_name": "large-v3",
-                "compute_type": "int8",
-                "device": "cpu",
-                "threads": min(psutil.cpu_count(), 4),
-                "batch_size": 1
-            }
+        # 检查模型是否已下载
+        model_checks = [
+            ("large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")),
+            ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
+            ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
+            ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
+            ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3"))
+        ]
+        
+        for model_name, model_path in model_checks:
+            if os.path.exists(model_path):
+                self.logger.info(f"Found {model_name} model at: {model_path}")
+                available_models.append({
+                    "name": model_name,
+                    "path": model_path,
+                    "compute_type": "int8",
+                    "device": "cpu",
+                    "threads": self._get_optimal_threads_for_model(model_name)
+                })
+                
+        if not available_models:
+            self.logger.warning("No downloaded models found")
             
-        # 检查medium模型
-        medium_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")
-        if os.path.exists(medium_path):
-            self.logger.info(f"Found medium model at: {medium_path}")
-            self.logger.info("Using medium model")
-            return {
-                "model_name": "medium",
-                "compute_type": "int8",
-                "device": "cpu",
-                "threads": min(psutil.cpu_count(), 4),
-                "batch_size": 1
-            }
-            
-        # 检查small模型
-        small_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")
-        if os.path.exists(small_path):
-            self.logger.info(f"Found small model at: {small_path}")
-            self.logger.info("Using small model")
-            return {
-                "model_name": "small",
-                "compute_type": "int8",
-                "device": "cpu",
-                "threads": min(psutil.cpu_count(), 2),
-                "batch_size": 1
-            }
-            
-        self.logger.warning("No downloaded models found")
-        return None
+        return available_models
+    
+    def _get_optimal_threads_for_model(self, model_name: str) -> int:
+        """根据模型和系统资源，返回最优的线程数"""
+        cpu_count = psutil.cpu_count(logical=False)
+        if cpu_count is None:
+            cpu_count = psutil.cpu_count(logical=True)
+            if cpu_count is None:
+                cpu_count = 2
+        
+        if model_name == "large-v3" or model_name == "distil-large-v3":
+            return min(cpu_count, 8)  # 使用最多8个线程
+        elif model_name == "medium":
+            return min(cpu_count, 6)  # 使用最多6个线程
+        elif model_name == "small":
+            return min(cpu_count, 4)  # 使用最多4个线程
+        else:  # base or other
+            return min(cpu_count, 2)  # 使用最多2个线程
         
     def get_optimal_settings(self) -> Dict[str, Any]:
         """根据系统资源情况，优化配置参数"""
@@ -83,7 +84,57 @@ class WhisperEngine:
             if cpu_count is None:
                 cpu_count = 2
                 
-        self.logger.info("Detecting downloaded models...")
+        # 首先检查是否有可用的已下载模型
+        if self.available_models:
+            # 优先使用large-v3
+            for model_info in self.available_models:
+                if model_info["name"] == "large-v3":
+                    self.logger.info(f"Using pre-downloaded large-v3 model")
+                    return {
+                        "model_name": "large-v3",
+                        "device": "cpu",
+                        "compute_type": "int8",
+                        "beam_size": 5,
+                        "threads": model_info["threads"]
+                    }
+            
+            # 如果没有large-v3，但有medium
+            for model_info in self.available_models:
+                if model_info["name"] == "medium":
+                    self.logger.info(f"Using pre-downloaded medium model")
+                    return {
+                        "model_name": "medium",
+                        "device": "cpu",
+                        "compute_type": "int8",
+                        "beam_size": 5,
+                        "threads": model_info["threads"]
+                    }
+            
+            # 如果没有medium，但有small
+            for model_info in self.available_models:
+                if model_info["name"] == "small":
+                    self.logger.info(f"Using pre-downloaded small model")
+                    return {
+                        "model_name": "small",
+                        "device": "cpu",
+                        "compute_type": "int8",
+                        "beam_size": 5,
+                        "threads": model_info["threads"]
+                    }
+            
+            # 使用任何已下载的模型
+            model_info = self.available_models[0]
+            self.logger.info(f"Using pre-downloaded {model_info['name']} model")
+            return {
+                "model_name": model_info["name"],
+                "device": "cpu",
+                "compute_type": "int8",
+                "beam_size": 5,
+                "threads": model_info["threads"]
+            }
+        
+        # 如果没有已下载的模型，根据系统资源选择
+        self.logger.info("No downloaded models found, selecting based on system resources")
         # 检查是否已下载大模型
         large_model_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")
         if os.path.exists(large_model_path):

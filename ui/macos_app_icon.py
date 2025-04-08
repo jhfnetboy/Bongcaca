@@ -27,10 +27,10 @@ def create_macos_app_icon():
         
         icns_file = icon_path / "VoiceTyper.icns"
         
-        # 如果图标已经存在，直接返回路径
+        # 强制重新生成图标，解决图标不显示问题
         if icns_file.exists():
-            logger.debug(f"MacOS图标已存在: {icns_file}")
-            return str(icns_file)
+            logger.debug(f"删除旧的MacOS图标: {icns_file}")
+            icns_file.unlink()
         
         # 创建临时目录
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -47,19 +47,50 @@ def create_macos_app_icon():
                 pixmap = create_logo_pixmap(size)
                 icon_file = icon_dir / f"icon_{size}x{size}.png"
                 pixmap.save(str(icon_file))
+                logger.debug(f"生成图标: {icon_file}")
                 
                 # 生成2x尺寸(Retina)
                 if size <= 512:  # 1024已经是最大的了
                     pixmap_2x = create_logo_pixmap(size * 2)
                     icon_file_2x = icon_dir / f"icon_{size}x{size}@2x.png"
                     pixmap_2x.save(str(icon_file_2x))
+                    logger.debug(f"生成Retina图标: {icon_file_2x}")
             
+            # 确保临时目录中的图标文件都已正确生成
+            if not any(icon_dir.glob("*.png")):
+                logger.error("临时目录中没有找到任何PNG图标文件")
+                return False
+                
             # 使用iconutil命令生成.icns文件
-            subprocess.run(["iconutil", "-c", "icns", "-o", str(icns_file), str(icon_dir)], 
-                           check=True, capture_output=True)
-            
-            logger.info(f"成功创建MacOS应用图标: {icns_file}")
-            return str(icns_file)
+            try:
+                cmd = ["iconutil", "-c", "icns", "-o", str(icns_file), str(icon_dir)]
+                logger.debug(f"执行命令: {' '.join(cmd)}")
+                result = subprocess.run(cmd, check=True, capture_output=True)
+                logger.debug(f"命令输出: {result.stdout.decode()}")
+                
+                if not icns_file.exists() or icns_file.stat().st_size == 0:
+                    logger.error(f"图标文件未生成或为空: {icns_file}")
+                    return False
+                    
+                logger.info(f"成功创建MacOS应用图标: {icns_file}")
+                return str(icns_file)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"iconutil命令执行失败: {e.stderr.decode() if e.stderr else str(e)}")
+                
+                # 尝试使用备用方法生成图标
+                logger.debug("尝试使用sips命令生成图标")
+                try:
+                    # 复制一个PNG图标作为备用
+                    fallback_icon = icon_path / "VoiceTyper.png"
+                    biggest_icon = list(icon_dir.glob("*1024*.png"))
+                    if biggest_icon:
+                        import shutil
+                        shutil.copy(str(biggest_icon[0]), str(fallback_icon))
+                        logger.info(f"已创建备用PNG图标: {fallback_icon}")
+                        return str(fallback_icon)
+                except Exception as e2:
+                    logger.error(f"备用方法也失败: {e2}")
+                return False
     
     except Exception as e:
         logger.error(f"创建MacOS应用图标失败: {e}")

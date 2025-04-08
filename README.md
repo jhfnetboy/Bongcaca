@@ -929,3 +929,55 @@ conda activate voice_typer
 
 huggingface-cli download --resume-download Systran/faster-whisper-large-v3，
 下载成功文件在 ~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478                                        
+
+# 语音打字器 (Voice Typer)
+
+## 应用打包说明
+
+### 使用打包脚本
+
+本项目现在提供了自动化打包脚本，可以一键构建macOS和Windows应用程序。
+
+#### 1. macOS平台打包
+
+在macOS系统上，打开终端并运行以下命令：
+
+```bash
+# 安装依赖
+pip install pyinstaller Pillow
+
+# 如果需要创建DMG安装镜像，请安装create-dmg
+brew install create-dmg
+
+# 运行打包脚本
+python build_app.py
+```
+
+这将创建：
+- `dist/VoiceTyper.app` - macOS应用程序
+- `VoiceTyper.dmg` - 安装镜像（如果已安装create-dmg）
+
+#### 2. Windows平台打包
+
+在Windows系统上，打开命令提示符或PowerShell并运行：
+
+```cmd
+# 安装依赖
+pip install pyinstaller Pillow
+
+# 安装Inno Setup（用于创建安装程序）
+# 请从 https://jrsoftware.org/isdl.php 下载并安装
+
+# 运行打包脚本
+python build_app.py
+```
+
+这将创建：
+- `dist/VoiceTyper.exe` - Windows可执行文件
+- `installer/VoiceTyper_Setup.exe` - 安装程序（如果已安装Inno Setup）
+
+### 手动打包详细步骤
+
+如果自动打包脚本不满足需求，您也可以按照以下步骤手动打包：
+
+// ... existing content ...

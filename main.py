@@ -161,8 +161,9 @@ def run_recording_loop(window, engine, recorder, max_duration=300):
                     level = recorder.get_audio_level()
                     window.update_audio_level(level)
                     
-                    # 记录日志（降低频率以避免日志过多）
-                    if int(time.time()) % 5 == 0:
+                    # 每0.5秒记录一次音频电平(从原来的5秒改为0.5秒)
+                    current_time = time.time()
+                    if current_time - start_time - int(current_time - start_time) < 0.05:
                         logger.debug(f"当前音频电平: {level:.2f}")
                 
                 # 短暂休眠
@@ -216,54 +217,118 @@ def run_recording_loop(window, engine, recorder, max_duration=300):
             logger.error(f"停止录音时发生错误: {e}")
 
 def on_toggle_recording(window, engine, recorder):
-    """处理开始/停止录音按钮事件"""
+    """处理录音按钮点击事件"""
+    # 如果当前正在录音，则停止录音
     if window.is_recording:
         logger.debug("停止录音")
+        window.update_status("正在停止录音...")
         window.is_recording = False
-        window.update_recording_state(False)  # 更新UI状态为停止
-        window.update_status("停止中...")
-        # 录音线程会自行结束
-    else:
-        # 检查是否有输入设备
-        device_id = window.get_selected_device_id()
-        if device_id is None:
-            logger.error("没有选择输入设备")
-            window.update_status("错误: 没有选择输入设备")
-            return
+        window.update_recording_state(False)
         
-        logger.debug(f"开始录音，使用设备ID: {device_id}")
+        # 如果有正在运行的录音线程，等待其结束
+        if hasattr(window, "_recording_thread") and window._recording_thread and window._recording_thread.is_alive():
+            # 这里不需要做什么，线程会自行检测录音状态并退出
+            pass
+            
+        return
         
-        # 确保录音前引擎已加载
-        try:
-            engine.ensure_model_loaded()
-        except Exception as e:
-            logger.error(f"加载模型失败: {e}")
-            window.update_status(f"错误: 无法加载模型 - {str(e)}")
-            return
+    # 开始新的录音
+    device_id = window.get_selected_device_id()
+    if device_id is None:
+        logger.error("没有选择输入设备")
+        window.update_status("错误: 没有选择输入设备")
+        return
         
-        # 设置录音设备
-        try:
-            recorder.set_device(device_id)
-        except Exception as e:
-            logger.error(f"设置录音设备失败: {e}")
-            window.update_status(f"错误: 无法设置录音设备 - {str(e)}")
-            return
+    logger.debug(f"开始录音，使用设备ID: {device_id}")
+    
+    # 确保模型已加载
+    try:
+        # 先检查模型是否已加载
+        if engine.model is None:
+            logger.info("模型尚未加载，正在加载...")
+            window.update_status("正在加载模型...")
+            
+        engine.ensure_model_loaded()
+        logger.info(f"使用模型: {engine.model_name}")
+    except Exception as e:
+        logger.error(f"加载模型失败: {e}")
+        window.update_status(f"加载模型失败: {str(e)}")
+        return
         
-        # 清空实时转写缓冲区
-        if window.transcription_mode == "realtime":
-            engine.clear_buffer()
+    # 显式设置录音设备
+    try:
+        # 确保设备初始化
+        if recorder.device_index != device_id:
+            logger.info(f"设置录音设备: {device_id}")
+            
+        recorder.set_device(device_id)
+        logger.info(f"已设置录音设备: {device_id}")
+    except Exception as e:
+        logger.error(f"设置录音设备失败: {e}")
+        window.update_status(f"设置录音设备失败: {str(e)}")
+        return
         
-        # 更新UI状态
-        window.is_recording = True
-        window.update_recording_state(True)  # 更新UI状态为录音
-        window.update_status("准备录音...")
+    # 设置录音状态
+    window.is_recording = True
+    window.update_recording_state(True)
+    window.update_status("录音中...")
+    
+    # 使用线程进行录音和转写
+    window._recording_thread = threading.Thread(
+        target=run_recording_loop, 
+        args=(window, engine, recorder)
+    )
+    window._recording_thread.daemon = True
+    window._recording_thread.start()
+    
+    # 确保线程成功启动
+    time.sleep(0.1)
+    if not window._recording_thread.is_alive():
+        logger.error("录音线程启动失败")
+        window.is_recording = False
+        window.update_recording_state(False)
+        window.update_status("录音线程启动失败")
+        return
         
-        # 在单独的线程中运行录音过程
-        threading.Thread(
-            target=run_recording_loop, 
-            args=(window, engine, recorder),
-            daemon=True
-        ).start()
+    logger.info("录音线程启动成功")
+
+def on_model_change(window, engine, model_name):
+    """处理模型变更事件"""
+    # 检查是否正在录音
+    if window.is_recording:
+        logger.warning("无法在录音过程中更改模型")
+        window.update_status("请先停止录音，然后再更改模型")
+        return
+        
+    logger.info(f"切换到模型: {model_name}")
+    window.update_status(f"正在切换到模型: {model_name}...")
+    
+    # 重置引擎状态
+    engine.model = None
+    engine.initialized = False
+    
+    # 强制设置模型名称
+    engine.settings = {
+        "model_name": model_name,
+        "device": "cpu",
+        "compute_type": "int8",
+        "beam_size": 5,
+        "threads": min(os.cpu_count(), 8)  # 使用多线程
+    }
+    
+    try:
+        # 显示正在加载的提示
+        window.update_status(f"正在加载模型 {model_name}...")
+        logger.info(f"开始加载模型: {model_name}")
+        
+        # 重新加载模型
+        engine.ensure_model_loaded()
+        
+        window.update_status(f"已切换到模型: {model_name}")
+        logger.info(f"模型切换成功: {model_name}")
+    except Exception as e:
+        logger.error(f"切换模型失败: {e}")
+        window.update_status(f"切换模型失败: {str(e)}")
 
 def main():
     """主函数"""
@@ -310,6 +375,8 @@ def main():
             window.device_changed.connect(recorder.set_device)
             # 连接模式切换信号
             window.transcription_mode_changed.connect(lambda mode: logger.info(f"转写模式已切换为: {mode}"))
+            # 连接模型变更信号
+            window.model_changed.connect(lambda model: on_model_change(window, engine, model))
         
         # 运行GUI应用
         from PySide6.QtWidgets import QApplication

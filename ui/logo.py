@@ -47,11 +47,21 @@ def create_logo_pixmap(size=128):
     painter.drawArc(center_x - wave_radius2/2, center_y - wave_radius2/2, 
                    wave_radius2, wave_radius2, -45 * 16, 90 * 16)
     
-    # 添加BCC文字
-    font = QFont("Arial", size/5, QFont.Bold)
+    # 添加BongCaCa文字（换行显示）
+    font_size = size/5
+    font = QFont("Arial", font_size, QFont.Bold)
     painter.setFont(font)
     painter.setPen(QPen(QColor(255, 255, 255)))
-    painter.drawText(size/8, size * 7/8, "BCC")
+    
+    # 绘制三行文字，调整位置使其更显眼
+    text_x = size/10
+    text_y_bong = size * 0.55
+    text_y_ca = size * 0.7
+    text_y_ca2 = size * 0.85
+    
+    painter.drawText(text_x, text_y_bong, "Bong")
+    painter.drawText(text_x, text_y_ca, "Ca")
+    painter.drawText(text_x, text_y_ca2, "Ca")
     
     painter.end()
     return pixmap
