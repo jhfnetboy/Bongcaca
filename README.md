@@ -926,4 +926,4 @@ if __name__ == "__main__":
 用huggingface-cli工具下载
 
 huggingface-cli download --resume-download Systran/faster-whisper-large-v3，
-下载成功文件在～/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478                                        
+下载成功文件在 ~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478                                        
