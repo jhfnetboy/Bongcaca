@@ -1,8 +1,10 @@
-from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit
+from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame
 from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject
-from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF
+from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont
 import numpy as np
 import logging
+import time
+from ui.logo import create_app_icon
 
 class AudioVisualizer(QWidget):
     def __init__(self, parent=None):
@@ -100,11 +102,18 @@ class DeviceSignals(QObject):
 class FloatingWindow(QMainWindow):
     # 定义自定义信号
     toggle_recording_signal = Signal()
+    transcription_mode_changed = Signal(str)  # 新增模式切换信号
     
-    def __init__(self, parent=None):
+    def __init__(self, config=None, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.Window)
         self.setWindowTitle("Voice Typer")
+        
+        # 设置应用图标
+        self.setWindowIcon(create_app_icon())
+        
+        # 配置对象
+        self.config = config
         
         # 初始化logger
         self.logger = logging.getLogger(__name__)
@@ -115,6 +124,8 @@ class FloatingWindow(QMainWindow):
         
         # 设备初始化状态
         self.device_initialized = False
+        self.is_recording = False
+        self.transcription_mode = "batch"  # 默认是批量模式
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -143,6 +154,35 @@ class FloatingWindow(QMainWindow):
         """)
         self.device_combo.currentIndexChanged.connect(self.on_device_changed)
         layout.addWidget(self.device_combo)
+        
+        # 添加模式选择框
+        mode_frame = QFrame()
+        mode_frame.setFrameShape(QFrame.StyledPanel)
+        mode_frame.setStyleSheet("QFrame { background-color: #f0f0f0; border-radius: 4px; padding: 5px; }")
+        mode_layout = QVBoxLayout(mode_frame)
+        
+        mode_label = QLabel("Transcription Mode:")
+        mode_label.setAlignment(Qt.AlignCenter)
+        mode_layout.addWidget(mode_label)
+        
+        mode_group = QButtonGroup(self)
+        
+        mode_buttons_layout = QHBoxLayout()
+        self.batch_mode_radio = QRadioButton("Batch")
+        self.batch_mode_radio.setChecked(True)  # 默认选中批量模式
+        self.realtime_mode_radio = QRadioButton("Realtime")
+        
+        mode_group.addButton(self.batch_mode_radio)
+        mode_group.addButton(self.realtime_mode_radio)
+        
+        mode_buttons_layout.addWidget(self.batch_mode_radio)
+        mode_buttons_layout.addWidget(self.realtime_mode_radio)
+        mode_layout.addLayout(mode_buttons_layout)
+        
+        # 连接模式切换信号
+        self.batch_mode_radio.toggled.connect(self.on_mode_changed)
+        
+        layout.addWidget(mode_frame)
         
         # 创建录音按钮
         self.toggle_button = ToggleButton()
@@ -204,7 +244,7 @@ class FloatingWindow(QMainWindow):
             self.status_label.setText("初始化设备中,请稍候...")
             return
             
-        self.logger.debug(f"切换录音状态,当前状态: {self.toggle_button.is_recording}")
+        self.logger.debug(f"切换录音状态,当前状态: {self.is_recording}")
         # 发射信号,让main.py处理实际逻辑
         self.toggle_recording_signal.emit()
         
@@ -323,6 +363,38 @@ class FloatingWindow(QMainWindow):
         """更新音量显示"""
         self.visualizer.update_level(level)
         self.logger.debug(f"Audio level: {level}%")
+
+    def get_selected_device_id(self):
+        """获取当前选择的设备ID"""
+        if self.device_combo.count() == 0:
+            return None
+        return self.device_combo.currentData()
+        
+    def update_status(self, status_text):
+        """更新状态文本"""
+        self.status_label.setText(status_text)
+        
+    def update_recording_state(self, is_recording):
+        """更新录音状态"""
+        self.is_recording = is_recording  # 更新窗口的录音状态标记
+        self.toggle_button.set_recording(is_recording)
+        self.visualizer.set_recording(is_recording)
+        self.logger.debug(f"更新录音按钮状态: {'录音中(红色方块)' if is_recording else '未录音(绿色三角)'}")
+
+    def on_mode_changed(self, checked):
+        """模式切换事件"""
+        if checked:  # 只在选中时触发
+            self.transcription_mode = "batch" if self.batch_mode_radio.isChecked() else "realtime"
+            self.logger.info(f"转写模式已切换为: {self.transcription_mode}")
+            self.transcription_mode_changed.emit(self.transcription_mode)
+            
+            # 根据模式更新状态提示
+            if self.transcription_mode == "batch":
+                mode_desc = "批量模式 - 停止录音后进行转写"
+            else:
+                mode_desc = "实时模式 - 录音时实时转写"
+                
+            self.status_label.setText(f"模式: {mode_desc}")
 
     class LogHandler(logging.Handler):
         def __init__(self, window):

@@ -36,6 +36,15 @@ class TextInput:
                                          capture_output=True, text=True)
                     window_name = result.stdout.strip()
                     self.logger.debug(f"当前焦点窗口: {window_name}")
+                    
+                    # 获取更多窗口细节
+                    try:
+                        active_app_cmd = '''osascript -e 'tell application "System Events" to get name of application processes whose frontmost is true' '''
+                        active_app = subprocess.run(active_app_cmd, shell=True, capture_output=True, text=True).stdout.strip()
+                        self.logger.debug(f"活动应用: {active_app}")
+                    except Exception as e:
+                        self.logger.debug(f"获取活动应用详情失败: {e}")
+                    
                     return window_name
                 except Exception as e:
                     self.logger.error(f"获取macOS焦点窗口失败: {e}")
@@ -77,19 +86,52 @@ class TextInput:
         """在macOS上插入文本"""
         methods_tried = []
         
+        # 在开始前激活目标窗口
+        try:
+            # 获取当前焦点窗口
+            window_name = self.get_focused_window()
+            self.logger.debug(f"准备向窗口插入文本: {window_name}")
+            
+            # 确保目标窗口处于活动状态
+            if window_name != "python" and window_name != "Unknown":
+                activate_cmd = f'''osascript -e 'tell application "{window_name}" to activate' '''
+                subprocess.run(activate_cmd, shell=True)
+                self.logger.debug(f"已尝试激活窗口: {window_name}")
+                # 等待窗口激活
+                time.sleep(0.5)
+        except Exception as e:
+            self.logger.warning(f"激活窗口失败: {e}")
+        
         # 方法1: PyAutoGUI
         try:
             import pyautogui
-            pyautogui.write(text)
+            # 先确保焦点在正确位置
+            pyautogui.click()
+            time.sleep(0.2)
+            # 模拟击键，一个字符一个字符地输入以提高准确性
+            for char in text:
+                pyautogui.write(char)
+                time.sleep(0.01)  # 添加少量延迟
             self.logger.debug(f"使用PyAutoGUI插入文本成功: {text}")
             return True
         except Exception as e:
             methods_tried.append(f"PyAutoGUI失败: {e}")
             
-        # 方法2: AppleScript
+        # 方法2: AppleScript (增强版)
         try:
-            cmd = f'''osascript -e 'tell application "System Events" to keystroke "{text}"' '''
-            subprocess.run(cmd, shell=True)
+            # 使用单引号包围文本内容，避免双引号导致的命令解析错误
+            safe_text = text.replace("'", "'\\''")
+            
+            # 使用System Events直接模拟键盘输入
+            cmd = f'''osascript -e 'tell application "System Events" 
+                delay 0.5
+                keystroke "{safe_text}"
+                end tell' '''
+            
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                self.logger.warning(f"AppleScript执行返回非零状态: {result.stderr}")
+            
             self.logger.debug(f"使用AppleScript插入文本成功: {text}")
             return True
         except Exception as e:
@@ -101,14 +143,17 @@ class TextInput:
             save_clipboard = subprocess.run('pbpaste', shell=True, capture_output=True, text=True).stdout
             
             # 设置新内容到剪贴板
-            subprocess.run(f'echo "{text}" | pbcopy', shell=True)
+            set_clip_cmd = ["pbcopy"]
+            process = subprocess.Popen(set_clip_cmd, stdin=subprocess.PIPE)
+            process.communicate(text.encode('utf-8'))
             
             # 模拟Command+V
             subprocess.run('osascript -e \'tell application "System Events" to keystroke "v" using command down\'', shell=True)
             
             # 恢复原剪贴板内容
             time.sleep(0.5)
-            subprocess.run(f'echo "{save_clipboard}" | pbcopy', shell=True)
+            restore_process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+            restore_process.communicate(save_clipboard.encode('utf-8'))
             
             self.logger.debug(f"使用剪贴板方法插入文本成功: {text}")
             return True
