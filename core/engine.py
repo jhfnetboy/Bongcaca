@@ -10,6 +10,9 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
+# 设置环境变量以避免OpenMP冲突
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 logger = logging.getLogger(__name__)
 
 class WhisperEngine:
@@ -88,26 +91,31 @@ class WhisperEngine:
             model_name = "large-v3"
             compute_type = "int8"
             beam_size = 5
+            # 对于多核CPU，使用更多线程
+            threads = min(cpu_count, 8)  # 使用最多8个线程，避免过度使用
         # 如果系统内存>=16GB且CPU核心数>=8，使用medium模型
         elif system_ram >= 16 and cpu_count >= 8:
             self.logger.info(f"System has {system_ram:.1f} GB RAM and {cpu_count} CPU cores. Using medium model.")
             model_name = "medium"
             compute_type = "int8"
             beam_size = 5
+            threads = min(cpu_count, 6)  # 使用最多6个线程
         # 如果系统内存>=8GB且CPU核心数>=4，使用small模型
         elif system_ram >= 8 and cpu_count >= 4:
             self.logger.info(f"System has {system_ram:.1f} GB RAM and {cpu_count} CPU cores. Using small model.")
             model_name = "small"
             compute_type = "int8"
             beam_size = 5
+            threads = min(cpu_count, 4)  # 使用最多4个线程
         # 否则使用tiny模型
         else:
             self.logger.info(f"System has {system_ram:.1f} GB RAM and {cpu_count} CPU cores. Using tiny model.")
             model_name = "tiny"
             compute_type = "int8"
             beam_size = 3
+            threads = min(cpu_count, 2)  # 使用最多2个线程
             
-        self.logger.info(f"Using {model_name} model")
+        self.logger.info(f"Using {model_name} model with {threads} threads")
         
         # 确定是否使用GPU
         device = "cpu"  # 默认使用CPU
@@ -119,7 +127,8 @@ class WhisperEngine:
             "model_name": model_name,
             "device": device,
             "compute_type": compute_type,
-            "beam_size": beam_size
+            "beam_size": beam_size,
+            "threads": threads
         }
         
     def _has_gpu(self):
@@ -143,6 +152,7 @@ class WhisperEngine:
         device = self.settings["device"]
         compute_type = self.settings["compute_type"]
         beam_size = self.settings["beam_size"]
+        threads = self.settings.get("threads", min(psutil.cpu_count(), 4))
         
         try:
             from faster_whisper import WhisperModel
@@ -152,7 +162,8 @@ class WhisperEngine:
                 model_size_or_path=model_name,
                 device=device,
                 compute_type=compute_type,
-                download_root=self.config.models_dir if hasattr(self.config, "models_dir") else None
+                download_root=self.config.models_dir if hasattr(self.config, "models_dir") else None,
+                cpu_threads=threads
             )
             self.model_name = model_name
             self.initialized = True
