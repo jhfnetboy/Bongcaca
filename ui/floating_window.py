@@ -5,6 +5,8 @@ import numpy as np
 import logging
 import time
 import os
+import platform
+import subprocess
 from ui.logo import create_app_icon
 
 class AudioVisualizer(QWidget):
@@ -280,13 +282,65 @@ class FloatingWindow(QMainWindow):
         self.idle_timer.start(100)  # 100毫秒更新一次
         
     def keyPressEvent(self, event):
+        """处理键盘事件"""
+        # 处理空格键触发录音
         if event.key() == Qt.Key_Space:
-            if self.device_initialized:  # 仅当设备初始化完成时才允许空格控制
-                self.toggle_recording_signal.emit()  # 发射信号,不直接调用toggle_recording
+            self.toggle_button.click()
+            event.accept()
+            return
+            
+        # 添加Shift+V快捷键直接输入最后的转写结果
+        if event.key() == Qt.Key_V and event.modifiers() == Qt.ShiftModifier:
+            if hasattr(self, 'last_transcription') and self.last_transcription:
+                try:
+                    from platform_specific.input import TextInput
+                    text_input = TextInput()
+                    
+                    # 尝试直接插入最近的转写文本
+                    result = text_input.insert_text(self.last_transcription)
+                    if result:
+                        self.logger.info("已使用快捷键插入最近的转写文本")
+                        self.status_label.setText("已插入最近的转写文本")
+                    else:
+                        self.logger.error("使用快捷键插入文本失败")
+                except Exception as e:
+                    self.logger.error(f"快捷键插入文本失败: {e}")
             else:
-                self.status_label.setText("初始化设备中,请稍候...")
-        else:
-            super().keyPressEvent(event)
+                self.logger.warning("没有可用的转写结果可插入")
+                self.status_label.setText("没有可用的转写结果可插入")
+            event.accept()
+            return
+            
+        # 添加双击Shift功能 - 需要在类中跟踪状态
+        if event.key() == Qt.Key_Shift:
+            current_time = time.time()
+            if hasattr(self, 'last_shift_press') and (current_time - self.last_shift_press) < 0.5:
+                # 双击Shift检测到
+                if hasattr(self, 'last_transcription') and self.last_transcription:
+                    try:
+                        from platform_specific.input import TextInput
+                        text_input = TextInput()
+                        
+                        # 尝试直接插入最近的转写文本
+                        result = text_input.insert_text(self.last_transcription)
+                        if result:
+                            self.logger.info("已使用双击Shift插入最近的转写文本")
+                            self.status_label.setText("已插入最近的转写文本")
+                        else:
+                            self.logger.error("使用双击Shift插入文本失败")
+                    except Exception as e:
+                        self.logger.error(f"双击Shift插入文本失败: {e}")
+                else:
+                    self.logger.warning("没有可用的转写结果可插入")
+                    self.status_label.setText("没有可用的转写结果可插入")
+                self.last_shift_press = 0  # 重置，避免连续触发
+            else:
+                self.last_shift_press = current_time
+            event.accept()
+            return
+            
+        # 调用父类方法处理其他键盘事件
+        super().keyPressEvent(event)
             
     def toggle_recording(self):
         """切换录音状态 - 只发射信号,不改变状态"""
@@ -362,21 +416,39 @@ class FloatingWindow(QMainWindow):
         self.result_text.append(text)
         self.logger.info(f"转写结果: {text}")
         
+        # 保存最新的转写结果到应用剪贴板
+        self.last_transcription = text
+        
+        # 自动将文本复制到系统剪贴板
+        try:
+            system = platform.system()
+            if system == "Darwin":  # macOS
+                process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+                process.communicate(text.encode('utf-8'))
+                self.logger.info("转写结果已复制到剪贴板，可使用Command+V粘贴")
+                self.status_label.setText("转写结果已复制到剪贴板 (Command+V 粘贴)")
+            elif system == "Windows":
+                # Windows剪贴板操作
+                import win32clipboard
+                import win32con
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                self.logger.info("转写结果已复制到剪贴板，可使用Ctrl+V粘贴")
+                self.status_label.setText("转写结果已复制到剪贴板 (Ctrl+V 粘贴)")
+            else:  # Linux
+                subprocess.run(f'echo "{text}" | xclip -i -selection clipboard', shell=True)
+                self.logger.info("转写结果已复制到剪贴板，可使用Ctrl+V粘贴")
+                self.status_label.setText("转写结果已复制到剪贴板 (Ctrl+V 粘贴)")
+        except Exception as e:
+            self.logger.error(f"复制到剪贴板失败: {e}")
+            
         # 将文本输出到当前光标位置
         try:
-            from platform_specific.input import TextInput
-            text_input = TextInput()
-            
-            # 获取当前窗口
-            current_window = text_input.get_focused_window()
-            self.logger.debug(f"当前焦点窗口: {current_window}")
-            
-            # 尝试所有可用方法输入文本
-            result = text_input.insert_text(text)
-            if result:
-                self.logger.debug("文本插入成功")
-            else:
-                self.logger.error("无法插入文本到当前窗口")
+            # 这里保留原有的自动插入文本功能，但不再默认执行
+            # 现在我们只保存文本到剪贴板，用户可以通过快捷键粘贴
+            pass
                 
         except Exception as e:
             self.logger.error(f"插入文本过程中出错: {e}")
