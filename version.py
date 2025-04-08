@@ -1,4 +1,4 @@
-VERSION = "0.23.30"  # 更新版本号
+VERSION = "0.23.31"  # 更新版本号
 
 def get_version():
     return VERSION 

@@ -463,19 +463,34 @@ class FloatingWindow(QMainWindow):
                 ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3"))
             ]
             
+            # 打印所有模型路径信息
+            self.logger.info("----- 模型检测开始 -----")
+            for model_name, model_path in model_paths:
+                if os.path.exists(model_path):
+                    model_size = self._get_directory_size(model_path)
+                    self.logger.info(f"✓ 找到模型: {model_name} (路径: {model_path}, 大小: {self._format_size(model_size)})")
+                else:
+                    self.logger.info(f"✗ 未找到模型: {model_name} (预期路径: {model_path})")
+            self.logger.info("----- 模型检测结束 -----")
+            
+            # 更新结果文本区域
+            self.result_text.append("----- 模型检测结果 -----")
+            
             found_models = []
             for model_name, model_path in model_paths:
                 if os.path.exists(model_path):
-                    self.logger.info(f"找到已下载的模型: {model_name} 在 {model_path}")
+                    model_size = self._get_directory_size(model_path)
                     found_models.append((model_name, model_path))
                     self.available_models.append(model_name)
                     self.model_combo.addItem(f"{model_name} (已下载)", model_name)
+                    self.result_text.append(f"✓ 找到模型: {model_name} (大小: {self._format_size(model_size)})")
             
             # 如果没有找到已下载的模型，添加可下载选项
             if not found_models:
                 self.logger.warning("未找到已下载的模型，请下载模型")
                 self.model_combo.addItem("请下载模型", None)
                 self.download_button.setEnabled(True)
+                self.result_text.append("未找到已下载的模型，请使用'Download Model'按钮下载")
             else:
                 # 添加可下载的其他模型
                 self.model_combo.addItem("---可下载模型---", None)
@@ -487,10 +502,36 @@ class FloatingWindow(QMainWindow):
                 # 设置第一个模型为默认选择
                 self.model_combo.setCurrentIndex(0)
                 
+                self.result_text.append(f"已找到 {len(found_models)} 个已下载模型，默认使用: {found_models[0][0]}")
+            
             self.logger.info(f"模型列表初始化完成，找到 {len(found_models)} 个已下载模型")
         except Exception as e:
             self.logger.error(f"初始化模型列表失败: {e}")
             self.status_label.setText(f"初始化模型列表失败: {str(e)}")
+    
+    def _get_directory_size(self, path):
+        """获取目录大小（字节）"""
+        total_size = 0
+        try:
+            for dirpath, dirnames, filenames in os.walk(path):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    if os.path.exists(fp):
+                        total_size += os.path.getsize(fp)
+        except Exception as e:
+            self.logger.error(f"计算目录大小出错: {e}")
+        return total_size
+    
+    def _format_size(self, size_bytes):
+        """格式化文件大小"""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes/1024:.2f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes/(1024*1024):.2f} MB"
+        else:
+            return f"{size_bytes/(1024*1024*1024):.2f} GB"
     
     def on_model_changed(self, index):
         """模型切换事件"""
@@ -543,12 +584,18 @@ class FloatingWindow(QMainWindow):
                 # 显示对话框并获取用户选择
                 result = dialog.exec()
                 
-                if result == QMessageBox.ButtonRole.RejectRole or result < 0:
+                # 修复：如果用户点击取消按钮，直接返回
+                cancel_idx = len(models_to_download)  # 取消按钮的索引
+                if result == cancel_idx or result < 0:
+                    self.logger.info("用户取消了模型下载")
                     return
                 
-                # 获取选中的模型名称
-                selected_index = result
-                model_name = models_to_download[selected_index][0]
+                # 修复：确保selected_index在有效范围内
+                if result < len(models_to_download):
+                    model_name = models_to_download[result][0]
+                else:
+                    self.logger.warning(f"无效的选择索引: {result}, 可用选项数: {len(models_to_download)}")
+                    return
             
             # 检查是否正在录音
             if self.is_recording:
@@ -615,7 +662,7 @@ class FloatingWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"下载模型过程中出错: {e}")
             # 在主线程中更新UI
-            from PySide6.QtCore import QTimer
+            # 确保QTimer导入正确
             QTimer.singleShot(0, lambda: self.download_completed(False, str(e)))
     
     @Slot(bool, str)

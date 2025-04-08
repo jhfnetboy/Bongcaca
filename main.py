@@ -186,18 +186,41 @@ def run_recording_loop(window, engine, recorder, max_duration=300):
         
         # 在批量模式下进行文件转写
         if window.transcription_mode == "batch" and audio_file and os.path.exists(audio_file):
-            logger.info(f"录音文件保存到: {audio_file}")
+            # 记录录音文件信息
+            file_size = os.path.getsize(audio_file)
+            file_size_mb = file_size / (1024 * 1024)
+            recording_duration = time.time() - start_time
+            
+            logger.info(f"录音文件保存到: {audio_file} (大小: {file_size_mb:.2f}MB, 时长: {recording_duration:.2f}秒)")
             window.update_status("转写中...")
+            
+            # 开始计时转写过程
+            transcribe_start_time = time.time()
             
             # 转写音频
             try:
                 logger.debug(f"开始转写音频文件: {audio_file}")
                 result = engine.transcribe(audio_file)
                 
+                # 计算转写时间
+                transcribe_time = time.time() - transcribe_start_time
+                
                 if not result or not result.strip():
                     logger.warning("转写结果为空")
                     window.update_status("转写完成，但结果为空")
                     return
+                
+                # 计算字符数和中文字数
+                char_count = len(result)
+                chinese_char_count = sum(1 for char in result if '\u4e00' <= char <= '\u9fff')
+                
+                # 记录详细统计信息
+                stats_msg = (
+                    f"录音统计: 文件大小={file_size_mb:.2f}MB, 录音时长={recording_duration:.2f}秒, "
+                    f"转写时间={transcribe_time:.2f}秒, 字符数={char_count}, 中文字数={chinese_char_count}"
+                )
+                logger.info(stats_msg)
+                window.result_text.append(f"\n--- {stats_msg} ---\n")
                 
                 logger.info(f"转写结果: {result}")
                 window.update_result(result)

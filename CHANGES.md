@@ -165,6 +165,13 @@
 - 新增：添加GitHub发布指南文档，详细说明如何将打包好的应用上传发布到GitHub
 - 文档：添加GitHub Actions自动化构建和发布流程示例
 
+## 2024-04-10 (0.23.31)
+- 修复：解决模型下载过程中的"QTimer"未定义错误
+- 修复：修复下载模型对话框点击"取消"按钮导致的索引越界错误
+- 改进：优化模型检测逻辑，显示详细的模型路径和大小信息
+- 新增：添加录音文件的详细统计信息(文件大小、录音时长、转写时间、字符数)
+- 优化：在图形界面和日志中显示更详细的模型检测和录音统计信息
+
 ## 初始化安装步骤
 
 1. 安装 Homebrew（如果没有）
@@ -229,3 +236,8 @@ conda install -c conda-forge pyside6
 conda activate voice_typer && python main.py
 
 hello Hello   我们再试试 当前传口是Cursor 我们转写完之后 输入到Cursor
+
+https://huggingface.co/Systran/faster-whisper-base
+https://huggingface.co/Systran/faster-whisper-small
+https://huggingface.co/Systran/faster-whisper-medium
+https://huggingface.co/Systran/faster-distil-whisper-large-v3
