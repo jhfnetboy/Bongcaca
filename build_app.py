@@ -247,6 +247,7 @@ def build_macos():
         "--clean",
         *icon_param,
         "--osx-bundle-identifier=com.bongcaca.voicetyper",
+        "--debug=all",
         "--add-data=resources:resources",
         "main.py"
     ]
@@ -270,8 +271,65 @@ def build_macos():
         # 复制自定义 plist
         custom_plist = resources_dir / "Info.plist"
         if custom_plist.exists():
+            # 添加更多权限声明到plist文件
+            with open(custom_plist, 'r', encoding='utf-8') as f:
+                plist_content = f.read()
+                
+            # 确保包含录音权限
+            if "<key>NSMicrophoneUsageDescription</key>" not in plist_content:
+                logger.warning("添加缺失的麦克风权限声明到Info.plist")
+                # 在</dict>前插入权限
+                plist_content = plist_content.replace('</dict>', '''    <key>NSMicrophoneUsageDescription</key>
+    <string>需要麦克风权限进行语音输入</string>
+</dict>''')
+            
+            # 确保包含控制其他应用的权限
+            if "<key>NSAppleEventsUsageDescription</key>" not in plist_content:
+                logger.warning("添加缺失的AppleEvents权限声明到Info.plist")
+                # 在</dict>前插入权限
+                plist_content = plist_content.replace('</dict>', '''    <key>NSAppleEventsUsageDescription</key>
+    <string>需要控制其他应用以插入文本</string>
+</dict>''')
+            
+            # 写入更新后的plist文件
+            with open(custom_plist, 'w', encoding='utf-8') as f:
+                f.write(plist_content)
+            
             shutil.copy(custom_plist, plist_path)
-            logger.info("已更新应用的 Info.plist")
+            logger.info("已更新应用的 Info.plist 并添加必要的权限声明")
+            
+            # 输出最终的plist内容以便检查
+            with open(plist_path, 'r', encoding='utf-8') as f:
+                final_plist = f.read()
+                logger.info(f"最终的Info.plist内容:\n{final_plist}")
+            
+            # 设置文件权限
+            try:
+                import stat
+                os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+                logger.info(f"已设置Info.plist权限: 644")
+            except Exception as e:
+                logger.error(f"设置Info.plist权限失败: {e}")
+            
+            # 检查应用结构
+            logger.info("检查打包应用的结构:")
+            app_contents = app_path / "Contents"
+            logger.info(f"应用目录: {app_path}")
+            
+            # 检查主要文件和目录
+            for path in ["MacOS/VoiceTyper", "Info.plist", "Resources"]:
+                full_path = app_contents / path
+                if os.path.exists(full_path):
+                    logger.info(f"✓ 存在: {path}")
+                else:
+                    logger.error(f"✗ 缺失: {path}")
+            
+            # 检查库和框架
+            frameworks_path = app_contents / "Frameworks"
+            if os.path.exists(frameworks_path):
+                logger.info(f"包含 {len(os.listdir(frameworks_path))} 个框架文件")
+            else:
+                logger.warning("缺少Frameworks目录")
     
     # 创建 DMG
     try:
@@ -298,6 +356,8 @@ def build_macos():
         logger.error(f"创建 DMG 时出错: {e}")
     
     logger.info(f"macOS 应用已构建完成: {app_path}")
+    logger.info("注意: 如果应用运行后无法访问麦克风，请检查系统偏好设置中的权限。")
+    logger.info("提示: 首次启动应用时，macOS会询问是否允许访问麦克风，请点击\"允许\"。")
     return True
 
 def build_windows():

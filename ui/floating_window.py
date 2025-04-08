@@ -542,7 +542,10 @@ class FloatingWindow(QMainWindow):
                 ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
                 ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
                 ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
-                ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3"))
+                ("tiny", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-tiny")),
+                ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3")),
+                ("distil-small.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-small.en")),
+                ("distil-medium.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-medium.en"))
             ]
             
             # 打印所有模型路径信息
@@ -576,7 +579,7 @@ class FloatingWindow(QMainWindow):
             else:
                 # 添加可下载的其他模型
                 self.model_combo.addItem("---可下载模型---", None)
-                available_to_download = ["large-v3", "medium", "small", "base", "distil-large-v3"]
+                available_to_download = ["large-v3", "medium", "small", "base", "tiny", "distil-large-v3", "distil-small.en", "distil-medium.en"]
                 for model in available_to_download:
                     if model not in self.available_models:
                         self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
@@ -660,11 +663,14 @@ class FloatingWindow(QMainWindow):
                 # 如果未选择或已下载，则显示选择对话框
                 models_to_download = []
                 models_info = [
+                    ("tiny", "39MB - 最小质量(英文)", "https://huggingface.co/Systran/faster-whisper-tiny"),
                     ("base", "74MB - 较低质量", "https://huggingface.co/Systran/faster-whisper-base"),
                     ("small", "244MB - 平衡质量", "https://huggingface.co/Systran/faster-whisper-small"),
                     ("medium", "769MB - 高质量", "https://huggingface.co/Systran/faster-whisper-medium"),
                     ("large-v3", "2.9GB - 最高质量", "https://huggingface.co/Systran/faster-whisper-large-v3"),
-                    ("distil-large-v3", "2.3GB - 较高质量", "https://huggingface.co/Systran/faster-distil-whisper-large-v3")
+                    ("distil-large-v3", "2.3GB - 较高质量", "https://huggingface.co/Systran/faster-distil-whisper-large-v3"),
+                    ("distil-small.en", "240MB - 仅英文优化", "https://huggingface.co/Systran/faster-distil-whisper-small.en"),
+                    ("distil-medium.en", "763MB - 仅英文高质量", "https://huggingface.co/Systran/faster-distil-whisper-medium.en")
                 ]
                 
                 for name, info, url in models_info:
@@ -680,26 +686,36 @@ class FloatingWindow(QMainWindow):
                 dialog.setWindowTitle("选择要下载的模型")
                 dialog.setText("请选择要下载的模型：\n(下载过程中程序可能会暂时无响应)")
                 
+                # 添加模型选择按钮
+                buttons = []
                 for idx, (name, info, _) in enumerate(models_to_download):
-                    dialog.addButton(f"{name} ({info})", QMessageBox.ButtonRole.ActionRole)
+                    button = dialog.addButton(f"{name} ({info})", QMessageBox.ButtonRole.ActionRole)
+                    buttons.append((button, name))
                 
-                dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+                cancel_button = dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
                 
                 # 显示对话框并获取用户选择
-                result = dialog.exec()
+                dialog.exec()
+                clicked_button = dialog.clickedButton()
                 
-                # 修复：如果用户点击取消按钮，直接返回
-                cancel_idx = len(models_to_download)  # 取消按钮的索引
-                if result == cancel_idx or result < 0:
+                # 如果点击取消或关闭对话框，直接返回
+                if clicked_button == cancel_button or clicked_button is None:
                     self.logger.info("用户取消了模型下载")
                     return
                 
-                # 修复：确保selected_index在有效范围内
-                if result < len(models_to_download):
-                    model_name = models_to_download[result][0]
-                else:
-                    self.logger.warning(f"无效的选择索引: {result}, 可用选项数: {len(models_to_download)}")
+                # 查找点击的按钮对应的模型名称
+                model_name = None
+                for button, name in buttons:
+                    if clicked_button == button:
+                        model_name = name
+                        break
+                
+                # 如果没有找到对应的模型名称，返回
+                if not model_name:
+                    self.logger.warning("无法确定选择的模型名称")
                     return
+                
+                self.logger.info(f"用户选择下载模型: {model_name}")
             
             # 检查是否正在录音
             if self.is_recording:
@@ -730,12 +746,21 @@ class FloatingWindow(QMainWindow):
         try:
             self.logger.info(f"开始下载模型: {model_name}")
             
+            # 确保model_name有效
+            if not model_name:
+                raise ValueError("无效的模型名称")
+            
             # 构建下载命令
             import subprocess
             
+            # 根据模型名称选择正确的仓库
             model_repo = f"Systran/faster-whisper-{model_name}"
             if model_name == "distil-large-v3":
                 model_repo = "Systran/faster-distil-whisper-large-v3"
+            elif model_name == "distil-small.en":
+                model_repo = "Systran/faster-distil-whisper-small.en"
+            elif model_name == "distil-medium.en":
+                model_repo = "Systran/faster-distil-whisper-medium.en"
                 
             cmd = [
                 "huggingface-cli",
@@ -791,7 +816,7 @@ class FloatingWindow(QMainWindow):
             self.model_combo.clear()
             
             # 先添加所有已下载的模型
-            for model in ["large-v3", "medium", "small", "base", "distil-large-v3"]:
+            for model in ["large-v3", "medium", "small", "base", "tiny", "distil-large-v3", "distil-small.en", "distil-medium.en"]:
                 if model in self.available_models:
                     self.model_combo.addItem(f"{model} (已下载)", model)
             
@@ -799,7 +824,7 @@ class FloatingWindow(QMainWindow):
             self.model_combo.addItem("---可下载模型---", None)
             
             # 添加未下载的模型
-            for model in ["large-v3", "medium", "small", "base", "distil-large-v3"]:
+            for model in ["large-v3", "medium", "small", "base", "tiny", "distil-large-v3", "distil-small.en", "distil-medium.en"]:
                 if model not in self.available_models:
                     self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
             

@@ -102,6 +102,56 @@ def test_text_input():
     
     logger.info("文本输入测试完成")
 
+def play_notification_sound():
+    """播放提示音以提示转写完成"""
+    try:
+        # 使用PyAudio播放简短提示音
+        try:
+            import pyaudio
+            import numpy as np
+            
+            pa = pyaudio.PyAudio()
+            beep_stream = pa.open(
+                format=pyaudio.paFloat32,
+                channels=1,
+                rate=16000,
+                output=True
+            )
+            
+            # 生成提示音（440Hz和880Hz，各200ms）
+            duration = 0.2  # 秒
+            volume = 0.5   # 音量（0.0-1.0）
+            fs = 16000     # 采样率
+            
+            # 第一个音（440Hz）
+            samples1 = (np.sin(2*np.pi*np.arange(fs*duration)*440/fs)).astype(np.float32)
+            samples1 = samples1 * volume
+            
+            # 短暂停顿
+            pause = np.zeros(int(fs*0.1), dtype=np.float32)
+            
+            # 第二个音（880Hz）
+            samples2 = (np.sin(2*np.pi*np.arange(fs*duration)*880/fs)).astype(np.float32)
+            samples2 = samples2 * volume
+            
+            # 合并两个提示音
+            samples = np.concatenate([samples1, pause, samples2])
+            
+            # 播放提示音
+            beep_stream.write(samples.tobytes())
+            
+            # 关闭流
+            beep_stream.stop_stream()
+            beep_stream.close()
+            pa.terminate()
+            
+            logger.debug("播放转写完成提示音")
+            
+        except Exception as e:
+            logger.warning(f"播放提示音失败: {e}")
+    except Exception as e:
+        logger.error(f"播放通知声音过程中出错: {e}")
+
 def run_recording_loop(window, engine, recorder, max_duration=300):
     """录音循环，处理音频录制和转写"""
     logger.debug("开始录音循环")
@@ -214,7 +264,7 @@ def run_recording_loop(window, engine, recorder, max_duration=300):
                 char_count = len(result)
                 chinese_char_count = sum(1 for char in result if '\u4e00' <= char <= '\u9fff')
                 
-                # 计算详细统计信息
+                # 记录详细统计信息
                 stats_msg = (
                     f"录音统计: 文件大小={file_size_mb:.2f}MB, 录音时长={recording_duration:.2f}秒, "
                     f"转写时间={transcribe_time:.2f}秒, 字符数={char_count}, 中文字数={chinese_char_count}, "
@@ -226,6 +276,10 @@ def run_recording_loop(window, engine, recorder, max_duration=300):
                 logger.info(f"转写结果: {result}")
                 window.update_result(result)
                 window.update_status("转写完成")
+                
+                # 转写完成后播放提示音
+                play_notification_sound()
+                
             except Exception as e:
                 logger.error(f"转写音频失败: {e}")
                 window.update_status(f"转写失败: {str(e)}")
