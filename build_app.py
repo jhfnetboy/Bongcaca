@@ -13,6 +13,10 @@ import logging
 from pathlib import Path
 import argparse
 
+# 初始化 Qt 应用程序
+from PySide6.QtWidgets import QApplication
+app = QApplication([])
+
 # 设置日志
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

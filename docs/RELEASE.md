@@ -5,7 +5,14 @@
 ## 准备工作
 
 1. 确保你已经有了一个GitHub仓库
-2. 确保你已经使用`build_app.py`脚本成功打包了应用程序
+2. 确保你已经使用
+```
+pip install pyinstaller
+brew install create-dmg
+
+python build_app.py
+```
+脚本成功打包了应用程序
 3. 安装[GitHub CLI](https://cli.github.com/)（可选，但推荐）
 
 ## 步骤1：创建新的发布版本
