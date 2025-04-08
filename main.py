@@ -12,101 +12,153 @@ from platform_specific.input import TextInput
 import logging
 
 def main():
-    # 设置日志
-    setup_logging()
-    logger = logging.getLogger(__name__)
-    
-    # 初始化配置
-    config = Config()
-    
-    # 创建应用
+    """主程序入口"""
+    # 应用程序初始化
     app = QApplication(sys.argv)
     
-    # 创建录音器
+    # 初始化日志
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("Starting Voice Typer")
+    
+    # 创建配置
+    config = Config()
+    
+    # 初始化引擎和录音器
+    engine = WhisperEngine(config)
     recorder = AudioRecorder()
     
-    # 创建语音识别引擎
-    engine = WhisperEngine(config)
-    
-    # 创建文本输入器
-    text_input = TextInput()
-    
-    # 创建浮动窗口
+    # 创建窗口
     window = FloatingWindow()
+    window.show()
     
-    # 连接设备选择
-    def on_device_changed(index):
-        device_index = window.device_combo.currentData()
-        if device_index is not None:
-            recorder.set_input_device(device_index)
-            window.toggle_button.setEnabled(True)
-        else:
-            window.toggle_button.setEnabled(False)
-            
-    window.device_combo.currentIndexChanged.connect(on_device_changed)
-    
-    # 录音线程
-    recording_thread = None
+    # 全局变量
     is_recording = False
+    recording_thread = None
     
+    # 录音循环
     def recording_loop():
         nonlocal is_recording
-        while is_recording:
-            try:
-                # 录制5秒音频
-                audio_file = recorder.record(5)
+        logger.debug("Recording loop started")
+        
+        try:
+            # 检查设备
+            if recorder.input_device_index is None:
+                logger.error("No input device selected")
+                window.status_label.setText("Error: No input device selected")
+                return
                 
-                # 识别语音
-                result = engine.transcribe(audio_file)
-                
-                # 更新界面
-                window.update_result(result)
-                
-                # 如果光标在文本输入区域，则输入文本
-                if result.strip():
-                    # 获取当前焦点窗口
-                    focused_window = text_input.get_focused_window()
-                    if focused_window and focused_window != "Unknown":
-                        text_input.input_text(result)
+            # 开始录音
+            recorder.start_recording()
+            logger.debug(f"Audio recorder started with device: {recorder.input_device_index}")
+            window.status_label.setText("Recording...")
+            
+            # 设置5分钟超时
+            start_time = time.time()
+            timeout = 5 * 60  # 5分钟
+            last_transcribe_time = 0  # 上次转写时间
+            
+            # 创建临时文件用于实时转写
+            temp_file = "temp_recording.wav"
+            transcription_interval = 2.0  # 每2秒转写一次
+            
+            while is_recording and (time.time() - start_time) < timeout:
+                try:
+                    # 获取音频电平
+                    level = recorder.get_audio_level()
+                    if level > 0:  # 只更新有声音时的电平
+                        logger.debug(f"Audio level: {level}")
+                        window.update_audio_level(level)
                         
-            except Exception as e:
-                logger.error(f"Recording error: {e}")
-                window.status_label.setText(f"Error: {str(e)}")
-                break
-                
+                        # 判断是否需要进行转写
+                        current_time = time.time()
+                        if current_time - last_transcribe_time >= transcription_interval:
+                            last_transcribe_time = current_time
+                            
+                            # 保存当前录音片段
+                            if recorder.save_recording(temp_file):
+                                # 转写当前片段
+                                window.status_label.setText("Transcribing...")
+                                try:
+                                    logger.debug("Starting transcription")
+                                    text = engine.transcribe(temp_file)
+                                    if text.strip():
+                                        logger.debug(f"Transcription result: {text}")
+                                        window.update_result(text)
+                                        window.status_label.setText("Recording...")
+                                except Exception as e:
+                                    logger.error(f"Transcription failed: {e}")
+                            else:
+                                logger.warning("Failed to save recording for transcription")
+                    
+                    # 等待一小段时间
+                    time.sleep(0.05)  # 保持波形流畅
+                    
+                except Exception as e:
+                    logger.error(f"Error in recording loop: {e}")
+                    window.status_label.setText(f"Error: {str(e)}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"Failed to start recording: {e}")
+            window.status_label.setText(f"Error: {str(e)}")
+        finally:
+            # 停止录音
+            recorder.stop()
+            logger.debug("Recording loop stopped")
+            window.status_label.setText("Ready")
+            
     # 连接录音按钮
     def on_toggle_recording():
         nonlocal is_recording, recording_thread
         
-        if window.toggle_button.text() == "Start Recording":
+        logger.debug(f"Toggle recording button clicked, current state: {window.toggle_button.is_recording}")
+        
+        # 录音开始
+        if not is_recording:
+            # 检查设备
             if recorder.input_device_index is None:
-                window.status_label.setText("Please select an input device first")
+                logger.error("No input device selected")
+                window.status_label.setText("请先选择输入设备")
                 return
                 
-            window.toggle_button.setText("Stop Recording")
+            logger.debug("Starting recording")
+            # 更新UI状态
+            window.toggle_button.set_recording(True)
             window.status_label.setText("Recording...")
             
-            # 开始录音线程
+            # 启动录音线程
             is_recording = True
             recording_thread = threading.Thread(target=recording_loop)
+            recording_thread.daemon = True
             recording_thread.start()
             
+        # 录音停止
         else:
-            window.toggle_button.setText("Start Recording")
-            window.status_label.setText("Ready")
+            logger.debug("Stopping recording")
+            # 更新UI状态
+            window.toggle_button.set_recording(False)
+            window.status_label.setText("停止录音中...")
             
             # 停止录音线程
             is_recording = False
-            if recording_thread:
-                recording_thread.join()
+            if recording_thread and recording_thread.is_alive():
+                recording_thread.join(timeout=1.0)
+                
+            # 确保录音器停止
             recorder.stop()
+            window.status_label.setText("就绪")
             
-    window.toggle_button.clicked.connect(on_toggle_recording)
+    # 连接设备变更信号
+    def on_device_changed(device_id):
+        logger.info(f"Setting input device to: {device_id}")
+        recorder.set_input_device(device_id)
+            
+    # 连接信号
+    window.toggle_recording_signal.connect(on_toggle_recording)
+    window.device_changed.connect(on_device_changed)
     
-    # 显示窗口
-    window.show()
-    
-    # 运行应用
+    # 运行应用程序
     sys.exit(app.exec())
 
 if __name__ == "__main__":

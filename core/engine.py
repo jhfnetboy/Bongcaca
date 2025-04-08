@@ -2,30 +2,27 @@ from faster_whisper import WhisperModel
 import os
 import logging
 from huggingface_hub import snapshot_download
+import psutil
+from utils.config import Config
 
 class WhisperEngine:
-    def __init__(self, model_path=None, settings=None):
-        """初始化引擎但不立即加载模型"""
-        # 如果未指定模型路径，使用默认缓存路径
-        if model_path is None:
-            model_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478")
-            
-        self.model_path = model_path
-        self.settings = settings or self.get_optimal_settings()
+    def __init__(self, config: Config):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
         self.model = None
+        self.model_name = None
+        self.settings = None
+        self._detect_models()
         
-        # 配置日志
-        logging.basicConfig()
-        logging.getLogger("faster_whisper").setLevel(logging.INFO)
+    def _detect_models(self):
+        """检测已下载的模型"""
+        self.logger.info("Detecting downloaded models...")
         
-    def get_optimal_settings(self):
-        """根据系统配置获取最佳性能设置"""
-        import psutil
-        
-        # 检查是否已下载large-v3模型
+        # 检查large-v3模型
         large_v3_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")
         if os.path.exists(large_v3_path):
-            print("Using large-v3 model")
+            self.logger.info(f"Found large-v3 model at: {large_v3_path}")
+            self.logger.info("Using large-v3 model")
             return {
                 "model_name": "large-v3",
                 "compute_type": "int8",
@@ -34,54 +31,94 @@ class WhisperEngine:
                 "batch_size": 1
             }
             
-        # 如果没有large-v3，根据系统配置选择
-        memory_gb = psutil.virtual_memory().total / (1024 * 1024 * 1024)
-        cpu_count = psutil.cpu_count(logical=False)
-        
-        if memory_gb >= 16 and cpu_count >= 8:
-            print("Using large-v3 model (recommended for your system)")
-            return {
-                "model_name": "large-v3",
-                "compute_type": "int8",
-                "device": "cpu",
-                "threads": min(cpu_count, 8),
-                "batch_size": 4
-            }
-        elif memory_gb >= 8 and cpu_count >= 4:
-            print("Using medium model (recommended for your system)")
+        # 检查medium模型
+        medium_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")
+        if os.path.exists(medium_path):
+            self.logger.info(f"Found medium model at: {medium_path}")
+            self.logger.info("Using medium model")
             return {
                 "model_name": "medium",
                 "compute_type": "int8",
                 "device": "cpu",
-                "threads": min(cpu_count, 4),
-                "batch_size": 2
+                "threads": min(psutil.cpu_count(), 4),
+                "batch_size": 1
             }
-        else:
-            print("Using small model (recommended for your system)")
+            
+        # 检查small模型
+        small_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")
+        if os.path.exists(small_path):
+            self.logger.info(f"Found small model at: {small_path}")
+            self.logger.info("Using small model")
             return {
                 "model_name": "small",
                 "compute_type": "int8",
                 "device": "cpu",
-                "threads": min(cpu_count, 2),
+                "threads": min(psutil.cpu_count(), 2),
                 "batch_size": 1
             }
+            
+        self.logger.warning("No downloaded models found")
+        return None
         
+    def get_optimal_settings(self):
+        """获取最优的模型和设置"""
+        # 检查是否已下载large-v3模型
+        large_v3_path = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")
+        if os.path.exists(large_v3_path):
+            self.logger.info("Using large-v3 model")
+            self.model_name = "large-v3"
+            self.settings = {
+                "device": "cuda" if self._has_gpu() else "cpu",
+                "compute_type": "float16" if self._has_gpu() else "int8",
+                "beam_size": 5
+            }
+            return
+            
+        # 如果没有large-v3,根据系统资源选择模型
+        memory = psutil.virtual_memory().total / (1024**3)  # GB
+        cpu_count = psutil.cpu_count()
+        
+        if memory >= 16 and cpu_count >= 4:
+            self.model_name = "medium"
+            self.settings = {
+                "device": "cuda" if self._has_gpu() else "cpu",
+                "compute_type": "float16" if self._has_gpu() else "int8",
+                "beam_size": 5
+            }
+        else:
+            self.model_name = "small"
+            self.settings = {
+                "device": "cuda" if self._has_gpu() else "cpu",
+                "compute_type": "float16" if self._has_gpu() else "int8",
+                "beam_size": 5
+            }
+            
+    def _has_gpu(self):
+        """检查是否有可用的GPU"""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except:
+            return False
+            
     def ensure_model_loaded(self):
         """确保模型已加载"""
         if self.model is None:
-            print("加载语音识别模型中...")
+            self.get_optimal_settings()
+            self.logger.info(f"Loading model: {self.model_name} with settings: {self.settings}")
+            
+            # 根据官方示例调用WhisperModel
             try:
                 self.model = WhisperModel(
-                    self.model_path,
+                    self.model_name,  # 使用模型名称,而不是路径
                     device=self.settings["device"],
-                    compute_type=self.settings["compute_type"],
-                    cpu_threads=self.settings["threads"]
+                    compute_type=self.settings["compute_type"]
                 )
-                print("模型加载完成")
+                self.logger.info("模型加载成功")
             except Exception as e:
-                print(f"模型加载失败: {str(e)}")
+                self.logger.error(f"模型加载失败: {e}")
                 raise
-    
+                
     def download_model(self, model_name="large-v3"):
         """检查模型是否存在，如果不存在则下载"""
         # 检查默认缓存路径
@@ -135,22 +172,46 @@ class WhisperEngine:
             print(f"下载模型失败: {str(e)}")
             return None
     
-    def transcribe(self, audio_file, language=None):
-        """转写音频文件"""
+    def transcribe(self, audio_file: str):
+        """转录音频文件"""
         self.ensure_model_loaded()
+        self.logger.info(f"Transcribing audio file: {audio_file}")
         
-        segments, info = self.model.transcribe(
-            audio_file,
-            language=language,
-            beam_size=5,
-            vad_filter=self.settings.get("vad_filter", True),
-            vad_parameters=self.settings.get("vad_parameters", {}),
-            batch_size=self.settings.get("batch_size", 1)
-        )
-        
-        # 收集所有文本段落
-        text_segments = []
-        for segment in segments:
-            text_segments.append(segment.text.strip())
-        
-        return " ".join(text_segments), info 
+        try:
+            # 设置语言为中文
+            segments, info = self.model.transcribe(
+                audio_file,
+                beam_size=self.settings["beam_size"],
+                language="zh",  # 指定中文
+                vad_filter=True,  # 添加语音活动检测
+                condition_on_previous_text=False,  # 关闭基于之前文本的条件
+                suppress_blank=True,  # 抑制空白
+                no_speech_threshold=0.6  # 提高无语音阈值
+            )
+            
+            # 获取检测到的语言
+            self.logger.info(f"Detected language: {info.language} (probability: {info.language_probability})")
+            
+            # 收集所有文本片段,并过滤掉广告内容
+            text = ""
+            segments_list = list(segments)  # 将生成器转换为列表
+            
+            for segment in segments_list:
+                # 过滤掉已知的广告内容
+                if "字幕由" in segment.text or "Amara.org" in segment.text or "社群提供" in segment.text or "字幕志愿者" in segment.text:
+                    self.logger.warning(f"过滤广告内容: {segment.text}")
+                    continue
+                
+                self.logger.debug(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
+                text += segment.text + " "
+                
+            filtered_text = text.strip()
+            if not filtered_text:
+                self.logger.warning("转写结果为空或全是广告内容")
+                return "请说话..."
+                
+            return filtered_text
+            
+        except Exception as e:
+            self.logger.error(f"Transcription failed: {e}")
+            raise 

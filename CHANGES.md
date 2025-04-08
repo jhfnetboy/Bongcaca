@@ -23,6 +23,40 @@
 - 添加了模型下载错误处理
 - 优化了模型加载的错误提示
 - 更新了安装步骤，添加了环境激活说明
+- Upgraded faster-whisper to version 1.1.1
+- Added word-level timestamp support
+- Improved model download and management features
+- Added logging configuration
+- Optimized model loading and recognition processes
+- Added system resource detection and model recommendation features
+- Fixed model download path issues
+- Added model version compatibility checks
+- Renamed platform directory to platform_specific to avoid conflicts with standard library
+- Configured conda environment to resolve dependency installation issues
+
+## 2024-03-22
+- Added model detection feature to automatically detect and use downloaded models
+- Added audio visualization with real-time waveform display
+- Improved UI with better button states and visual feedback
+- Added automatic input device selection
+- Added text input functionality to current focus position
+- Added pyautogui dependency for text input
+- Removed custom window controls in favor of system window controls
+- Added real-time audio level visualization
+- Improved error handling and user feedback
+- Added model detection logging
+
+## 2024-04-08
+- 修复了录音无法启动的严重问题:
+  - 重构了录音控制流程
+  - 分离UI状态和录音逻辑
+  - 使用信号机制代替直接函数调用
+  - 确保状态变更顺序正确
+- 改进了信号处理机制:
+  - 添加了录音控制专用信号
+  - 优化了按钮和键盘事件处理
+  - 增强了状态同步逻辑
+- 版本号更新至 0.23.37
 
 ## 初始化安装步骤
 
@@ -79,3 +113,6 @@ conda install -c conda-forge pyside6
    ```bash
    conda install -c conda-forge pyside6
    ``` 
+
+
+     
