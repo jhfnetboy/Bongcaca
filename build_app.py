@@ -12,6 +12,8 @@ import shutil
 import logging
 from pathlib import Path
 import argparse
+import time
+from datetime import datetime
 
 # 初始化 Qt 应用程序
 from PySide6.QtWidgets import QApplication
@@ -22,61 +24,73 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("build_app")
 
+# 版本信息
+VERSION = "0.23.43"
+BUILD_DATE = datetime.now().strftime("%Y-%m-%d")
+
+def get_version_info():
+    """获取版本信息"""
+    return {
+        "version": VERSION,
+        "build_date": BUILD_DATE,
+        "file_version": tuple(map(int, VERSION.split("."))) + (0,),
+        "product_version": tuple(map(int, VERSION.split("."))) + (0,)
+    }
+
 def check_requirements():
     """检查打包所需的依赖是否已安装"""
-    try:
-        import PyInstaller
-        logger.info("PyInstaller 已安装")
-    except ImportError:
-        logger.error("缺少 PyInstaller 依赖，请先安装: pip install pyinstaller")
+    required_tools = {
+        "PyInstaller": "pip install pyinstaller",
+        "PIL": "pip install pillow"
+    }
+    
+    if sys.platform == "darwin":
+        required_tools.update({
+            "iconutil": "系统自带",
+            "create-dmg": "brew install create-dmg"
+        })
+    elif sys.platform == "win32":
+        required_tools.update({
+            "Inno Setup": "https://jrsoftware.org/isdl.php"
+        })
+    
+    missing_tools = []
+    for tool, install_cmd in required_tools.items():
+        try:
+            if tool == "PyInstaller":
+                import PyInstaller
+            elif tool == "PIL":
+                from PIL import Image
+            elif tool == "iconutil" and sys.platform == "darwin":
+                subprocess.run(["iconutil", "--help"], capture_output=True, check=False)
+            elif tool == "create-dmg" and sys.platform == "darwin":
+                subprocess.run(["create-dmg", "--version"], capture_output=True, check=False)
+            elif tool == "Inno Setup" and sys.platform == "win32":
+                inno_path = Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe")
+                if not inno_path.exists():
+                    inno_path = Path("C:/Program Files/Inno Setup 6/ISCC.exe")
+                if not inno_path.exists():
+                    raise FileNotFoundError
+            logger.info(f"{tool} 已安装")
+        except (ImportError, FileNotFoundError):
+            missing_tools.append((tool, install_cmd))
+    
+    if missing_tools:
+        logger.error("缺少以下依赖:")
+        for tool, install_cmd in missing_tools:
+            logger.error(f"- {tool}: {install_cmd}")
         return False
-    
-    # 检查平台特定依赖
-    if sys.platform == "darwin":  # macOS
-        # 检查 iconutil
-        try:
-            subprocess.run(["iconutil", "--help"], capture_output=True, check=False)
-            logger.info("iconutil 可用")
-        except FileNotFoundError:
-            logger.warning("未找到 iconutil 命令，可能无法生成正确的应用图标")
-        
-        # 检查 create-dmg
-        try:
-            subprocess.run(["create-dmg", "--version"], capture_output=True, check=False)
-            logger.info("create-dmg 可用")
-        except FileNotFoundError:
-            logger.warning("未找到 create-dmg，将不能创建 DMG 安装包。可以通过以下命令安装: brew install create-dmg")
-    
-    elif sys.platform == "win32":  # Windows
-        # 检查 Inno Setup 是否存在
-        inno_path = Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe")
-        if not inno_path.exists():
-            inno_path = Path("C:/Program Files/Inno Setup 6/ISCC.exe")
-            
-        if not inno_path.exists():
-            logger.warning("未找到 Inno Setup，将不能创建 Windows 安装程序。请从 https://jrsoftware.org/isdl.php 下载安装")
-    
     return True
 
-def prepare_resources():
-    """准备资源文件"""
-    resources_dir = Path("resources")
-    resources_dir.mkdir(exist_ok=True)
-    
-    # 确保图标目录存在
-    icons_dir = resources_dir / "icons"
-    icons_dir.mkdir(exist_ok=True)
-    
-    # 生成应用图标
+def create_icon_files(icons_dir):
+    """创建应用图标文件"""
     try:
         from ui.logo import create_logo_pixmap
         
-        # 为 Windows 生成 .ico 文件
         if sys.platform == "win32":
             from PIL import Image
             import io
             
-            # 创建不同尺寸的图像
             images = []
             for size in [16, 32, 48, 64, 128, 256]:
                 pixmap = create_logo_pixmap(size)
@@ -85,22 +99,19 @@ def prepare_resources():
                 byte_array.seek(0)
                 img = Image.open(byte_array)
                 images.append(img)
-                
-            # 保存为 ICO 文件
+            
             icon_file = icons_dir / "app_icon.ico"
             images[0].save(str(icon_file), format='ICO', 
                           sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
                           append_images=images[1:])
             logger.info(f"Windows 图标已生成: {icon_file}")
         
-        # 为 macOS 生成 PNG 文件
         elif sys.platform == "darwin":
             png_file = icons_dir / "app_icon.png"
-            pixmap = create_logo_pixmap(1024)  # 大尺寸图标
+            pixmap = create_logo_pixmap(1024)
             pixmap.save(str(png_file))
             logger.info(f"macOS 图标已生成: {png_file}")
             
-            # 尝试生成 .icns 文件
             try:
                 from ui.macos_app_icon import create_macos_app_icon
                 icns_path = create_macos_app_icon()
@@ -115,12 +126,14 @@ def prepare_resources():
     except Exception as e:
         logger.error(f"准备图标资源失败: {e}")
         return False
-    
-    # 创建 Info.plist 模板 (macOS)
-    if sys.platform == "darwin":
-        plist_file = resources_dir / "Info.plist"
-        with open(plist_file, 'w', encoding='utf-8') as f:
-            f.write('''<?xml version="1.0" encoding="UTF-8"?>
+    return True
+
+def create_info_plist(resources_dir):
+    """创建 macOS Info.plist 文件"""
+    version_info = get_version_info()
+    plist_file = resources_dir / "Info.plist"
+    with open(plist_file, 'w', encoding='utf-8') as f:
+        f.write(f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -131,7 +144,9 @@ def prepare_resources():
     <key>CFBundleIdentifier</key>
     <string>com.bongcaca.voicetyper</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>{version_info['version']}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version_info['version']}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
@@ -142,16 +157,18 @@ def prepare_resources():
     <string>需要控制其他应用以插入文本</string>
 </dict>
 </plist>''')
-        logger.info(f"macOS Info.plist 模板已生成: {plist_file}")
-    
-    # 创建 Windows 版本信息文件
-    if sys.platform == "win32":
-        version_file = resources_dir / "version_info.txt"
-        with open(version_file, 'w', encoding='utf-8') as f:
-            f.write('''VSVersionInfo(
+    logger.info(f"macOS Info.plist 模板已生成: {plist_file}")
+    return True
+
+def create_version_info(resources_dir):
+    """创建 Windows 版本信息文件"""
+    version_info = get_version_info()
+    version_file = resources_dir / "version_info.txt"
+    with open(version_file, 'w', encoding='utf-8') as f:
+        f.write(f'''VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers={version_info['file_version']},
+    prodvers={version_info['product_version']},
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -166,35 +183,38 @@ def prepare_resources():
         u'040904B0',
         [StringStruct(u'CompanyName', u'BongCaCa'),
         StringStruct(u'FileDescription', u'Voice Typer'),
-        StringStruct(u'FileVersion', u'1.0.0'),
+        StringStruct(u'FileVersion', u'{version_info['version']}'),
         StringStruct(u'InternalName', u'VoiceTyper'),
         StringStruct(u'LegalCopyright', u'Copyright (c) 2024 BongCaCa'),
         StringStruct(u'OriginalFilename', u'VoiceTyper.exe'),
         StringStruct(u'ProductName', u'Voice Typer'),
-        StringStruct(u'ProductVersion', u'1.0.0')])
+        StringStruct(u'ProductVersion', u'{version_info['version']}')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [0x0409, 1200])])
   ]
 )''')
-        logger.info(f"Windows 版本信息文件已生成: {version_file}")
-        
-        # 创建 Inno Setup 脚本
-        inno_script = resources_dir / "installer.iss"
-        with open(inno_script, 'w', encoding='utf-8') as f:
-            f.write('''#define MyAppName "Voice Typer"
-#define MyAppVersion "1.0.0"
+    logger.info(f"Windows 版本信息文件已生成: {version_file}")
+    return True
+
+def create_inno_script(resources_dir):
+    """创建 Inno Setup 脚本"""
+    version_info = get_version_info()
+    inno_script = resources_dir / "installer.iss"
+    with open(inno_script, 'w', encoding='utf-8') as f:
+        f.write(f'''#define MyAppName "Voice Typer"
+#define MyAppVersion "{version_info['version']}"
 #define MyAppPublisher "BongCaCa"
 #define MyAppURL "https://github.com/yourusername/voicetyper"
 #define MyAppExeName "VoiceTyper.exe"
 
 [Setup]
 AppId={{B673DE85-CAA9-4B24-A2F9-C8A68F8C2C7D}}
-AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppPublisher={#MyAppPublisher}
-AppPublisherURL={#MyAppURL}
-DefaultDirName={autopf}\\{#MyAppName}
-DefaultGroupName={#MyAppName}
+AppName={{#MyAppName}}
+AppVersion={{#MyAppVersion}}
+AppPublisher={{#MyAppPublisher}}
+AppPublisherURL={{#MyAppURL}}
+DefaultDirName={{autopf}}\\{{#MyAppName}}
+DefaultGroupName={{#MyAppName}}
 OutputDir=installer
 OutputBaseFilename=VoiceTyper_Setup
 SetupIconFile=resources\\icons\\app_icon.ico
@@ -203,21 +223,42 @@ SolidCompression=yes
 PrivilegesRequired=admin
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "desktopicon"; Description: "{{cm:CreateDesktopIcon}}"; GroupDescription: "{{cm:AdditionalIcons}}"
 Name: "startupicon"; Description: "开机自动启动"; GroupDescription: "启动选项"
 
 [Files]
-Source: "dist\\VoiceTyper\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\\VoiceTyper\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"
-Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: startupicon
+Name: "{{group}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"
+Name: "{{autodesktop}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"; Tasks: desktopicon
+Name: "{{userstartup}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"; Tasks: startupicon
 
 [Run]
-Filename: "{app}\\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{{app}}\\{{#MyAppExeName}}"; Description: "{{cm:LaunchProgram,{{#StringChange(MyAppName, '&', '&&')}}}}"; Flags: nowait postinstall skipifsilent
 ''')
-        logger.info(f"Windows 安装程序脚本已生成: {inno_script}")
+    logger.info(f"Windows 安装程序脚本已生成: {inno_script}")
+    return True
+
+def prepare_resources():
+    """准备资源文件"""
+    resources_dir = Path("resources")
+    resources_dir.mkdir(exist_ok=True)
+    
+    icons_dir = resources_dir / "icons"
+    icons_dir.mkdir(exist_ok=True)
+    
+    if not create_icon_files(icons_dir):
+        return False
+    
+    if sys.platform == "darwin":
+        if not create_info_plist(resources_dir):
+            return False
+    elif sys.platform == "win32":
+        if not create_version_info(resources_dir):
+            return False
+        if not create_inno_script(resources_dir):
+            return False
     
     return True
 
@@ -237,7 +278,7 @@ def build_macos():
     else:
         icon_param = ["--icon", str(icon_file)]
     
-    # 构建命令
+    # 优化构建命令
     cmd = [
         "pyinstaller",
         "--name=VoiceTyper",
@@ -247,8 +288,20 @@ def build_macos():
         "--clean",
         *icon_param,
         "--osx-bundle-identifier=com.bongcaca.voicetyper",
-        "--debug=all",
-        "--add-data=resources:resources",
+        # 添加优化参数
+        "--noupx",  # 禁用 UPX 压缩，因为它可能导致一些问题
+        "--strip",  # 移除调试符号
+        # 排除不需要的模块
+        "--exclude-module=matplotlib",
+        "--exclude-module=notebook",
+        "--exclude-module=PIL.ImageQt",
+        "--exclude-module=PyQt5",
+        "--exclude-module=PyQt6",
+        "--exclude-module=tkinter",
+        # 只包含必要的数据文件
+        "--add-data=resources/icons:resources/icons",
+        # 优化 Python 字节码
+        "--python-option=O",
         "main.py"
     ]
     
@@ -266,98 +319,42 @@ def build_macos():
     plist_path = app_path / "Contents" / "Info.plist"
     if plist_path.exists():
         try:
-            # 备份原始文件
-            shutil.copy(plist_path, str(plist_path) + ".bak")
-            logger.info(f"成功备份原始Info.plist到 {plist_path}.bak")
-            
-            # 直接修改最终的 Info.plist 文件，确保包含所有必要权限
             from plistlib import load, dump
             
-            # 读取当前plist
             with open(plist_path, 'rb') as f:
                 plist_data = load(f)
             
-            # 添加必要的权限说明
             plist_data['NSMicrophoneUsageDescription'] = '需要麦克风权限进行语音输入'
             plist_data['NSAppleEventsUsageDescription'] = '需要控制其他应用以插入文本'
             
-            # 写回修改后的plist
             with open(plist_path, 'wb') as f:
                 dump(plist_data, f)
             
-            logger.info(f"已更新应用的Info.plist并添加必要的权限声明")
+            logger.info("已更新应用的Info.plist并添加必要的权限声明")
             
-            # 设置文件权限
             import stat
             os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-            logger.info(f"已设置Info.plist权限: 644")
-            
-            # 验证最终的Info.plist内容
-            with open(plist_path, 'rb') as f:
-                final_plist = load(f)
-                logger.info(f"最终的Info.plist包含以下权限声明:")
-                if 'NSMicrophoneUsageDescription' in final_plist:
-                    logger.info(f"✓ 麦克风权限: {final_plist['NSMicrophoneUsageDescription']}")
-                else:
-                    logger.error(f"✗ 缺少麦克风权限声明")
-                
-                if 'NSAppleEventsUsageDescription' in final_plist:
-                    logger.info(f"✓ AppleEvents权限: {final_plist['NSAppleEventsUsageDescription']}")
-                else:
-                    logger.error(f"✗ 缺少AppleEvents权限声明")
+            logger.info("已设置Info.plist权限: 644")
         
         except Exception as e:
             logger.error(f"修改Info.plist时出错: {e}")
-            logger.warning("将尝试使用备份方法更新Info.plist")
-            
-            # 备份方法：直接覆盖Info.plist文件
-            custom_plist = resources_dir / "Info.plist"
-            if custom_plist.exists():
-                # 确保模板文件包含正确的权限声明
-                with open(custom_plist, 'r', encoding='utf-8') as f:
-                    plist_content = f.read()
-                
-                # 检查并添加必要的权限声明
-                if "<key>NSMicrophoneUsageDescription</key>" not in plist_content:
-                    logger.warning("添加缺失的麦克风权限声明到Info.plist模板")
-                    plist_content = plist_content.replace('</dict>', '''    <key>NSMicrophoneUsageDescription</key>
-    <string>需要麦克风权限进行语音输入</string>
-</dict>''')
-                
-                if "<key>NSAppleEventsUsageDescription</key>" not in plist_content:
-                    logger.warning("添加缺失的AppleEvents权限声明到Info.plist模板")
-                    plist_content = plist_content.replace('</dict>', '''    <key>NSAppleEventsUsageDescription</key>
-    <string>需要控制其他应用以插入文本</string>
-</dict>''')
-                
-                # 写入更新后的模板
-                with open(custom_plist, 'w', encoding='utf-8') as f:
-                    f.write(plist_content)
-                
-                # 复制到应用目录
-                shutil.copy(custom_plist, plist_path)
-                logger.info(f"使用自定义模板覆盖Info.plist文件")
-        
-        # 检查应用结构
-        logger.info("检查打包应用的结构:")
-        app_contents = app_path / "Contents"
-        logger.info(f"应用目录: {app_path}")
-        
-        # 检查主要文件和目录
-        for path in ["MacOS/VoiceTyper", "Info.plist", "Resources"]:
-            full_path = app_contents / path
-            if os.path.exists(full_path):
-                logger.info(f"✓ 存在: {path}")
-            else:
-                logger.error(f"✗ 缺失: {path}")
-        
-        # 检查库和框架
-        frameworks_path = app_contents / "Frameworks"
-        if os.path.exists(frameworks_path):
-            logger.info(f"包含 {len(os.listdir(frameworks_path))} 个框架文件")
-        else:
-            logger.warning("缺少Frameworks目录")
+            return False
     
+    # 创建 DMG 前清理不必要的文件
+    try:
+        # 删除 __pycache__ 目录
+        for pycache in app_path.rglob("__pycache__"):
+            shutil.rmtree(pycache)
+        # 删除 .pyc 文件
+        for pyc in app_path.rglob("*.pyc"):
+            pyc.unlink()
+        # 删除测试文件
+        for test in app_path.rglob("test_*.py"):
+            test.unlink()
+        logger.info("已清理不必要的文件")
+    except Exception as e:
+        logger.warning(f"清理文件时出错: {e}")
+
     # 创建 DMG
     try:
         logger.info("创建 DMG 安装镜像...")
@@ -369,6 +366,8 @@ def build_macos():
             "--icon-size", "100",
             "--icon", "VoiceTyper.app", "200", "190",
             "--app-drop-link", "600", "185",
+            "--format", "UDZO",  # 使用 UDZO 格式进行压缩
+            "--no-internet-enable",  # 禁用网络链接
             "VoiceTyper.dmg",
             "dist/VoiceTyper.app"
         ]
@@ -383,8 +382,6 @@ def build_macos():
         logger.error(f"创建 DMG 时出错: {e}")
     
     logger.info(f"macOS 应用已构建完成: {app_path}")
-    logger.info("注意: 如果应用运行后无法访问麦克风，请检查系统偏好设置中的权限。")
-    logger.info("提示: 首次启动应用时，macOS会询问是否允许访问麦克风，请点击\"允许\"。")
     return True
 
 def build_windows():
@@ -430,11 +427,9 @@ def build_windows():
     
     # 创建安装程序
     try:
-        # 确保输出目录存在
         installer_dir = Path("installer")
         installer_dir.mkdir(exist_ok=True)
         
-        # 找到 Inno Setup 编译器
         iscc_path = Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe")
         if not iscc_path.exists():
             iscc_path = Path("C:/Program Files/Inno Setup 6/ISCC.exe")
@@ -481,6 +476,7 @@ def main():
             return 1
     
     logger.info(f"开始构建 Voice Typer 应用，目标平台: {platform}")
+    logger.info(f"版本: {VERSION}，构建日期: {BUILD_DATE}")
     
     # 检查依赖
     if not args.skip_deps_check and not check_requirements():

@@ -23,6 +23,8 @@ class AudioRecorder:
         self.device_index = None
         self.realtime_callback = None  # 实时转写回调函数
         self.realtime_mode = False     # 实时转写模式标志
+        self.start_time = None         # 录音开始时间
+        self.end_time = None           # 录音结束时间
         
         # 初始化设备
         self._ensure_temp_dir()
@@ -65,13 +67,7 @@ class AudioRecorder:
             return []
         
     def start_recording(self, device_index=None, realtime_mode=False, realtime_callback=None):
-        """开始录音
-        
-        Args:
-            device_index: 设备索引
-            realtime_mode: 是否使用实时转写模式
-            realtime_callback: 实时回调函数，接收音频数据块和级别
-        """
+        """开始录音"""
         if self.is_recording:
             self.logger.warning("Already recording")
             return False
@@ -79,6 +75,9 @@ class AudioRecorder:
         timestamp = int(time.time())
         self.current_filename = os.path.join(self.temp_dir, f"recording_{timestamp}.wav")
         self.logger.debug(f"Starting recording to {self.current_filename}")
+        
+        # 记录开始时间
+        self.start_time = time.time()
         
         # 设置实时模式
         self.realtime_mode = realtime_mode
@@ -107,12 +106,6 @@ class AudioRecorder:
         
         try:
             self.logger.debug(f"Using device index: {self.device_index}")
-            
-            # 播放短提示音表示开始录音
-            try:
-                self._play_beep()
-            except Exception as e:
-                self.logger.warning(f"播放提示音失败: {e}")
             
             self.stream = self.pyaudio.open(
                 format=pyaudio.paInt16,
@@ -147,33 +140,9 @@ class AudioRecorder:
             self.is_recording = False
             return False
             
-    def _play_beep(self):
-        """播放简短的提示音表示开始录音"""
-        try:
-            # 使用PyAudio播放简短提示音
-            beep_stream = self.pyaudio.open(
-                format=pyaudio.paFloat32,
-                channels=1,
-                rate=16000,
-                output=True
-            )
-            
-            # 生成简短的提示音（440Hz，200ms）
-            duration = 0.2  # 秒
-            volume = 0.5   # 音量（0.0-1.0）
-            fs = 16000     # 采样率
-            samples = (np.sin(2*np.pi*np.arange(fs*duration)*440/fs)).astype(np.float32)
-            samples = samples * volume
-            
-            # 播放提示音
-            beep_stream.write(samples.tobytes())
-            
-            # 关闭流
-            beep_stream.stop_stream()
-            beep_stream.close()
-            
-        except Exception as e:
-            self.logger.warning(f"播放提示音失败: {e}")
+    def _play_beep(self, is_start=True):
+        """播放简短的提示音表示开始/结束录音"""
+        pass  # 移除提示音逻辑，由主程序统一控制
     
     def stop(self):
         if not self.is_recording:
@@ -181,6 +150,9 @@ class AudioRecorder:
             return None
             
         self.is_recording = False
+        
+        # 记录结束时间
+        self.end_time = time.time()
         
         # 使用临时变量保存当前文件名
         current_file = self.current_filename
@@ -205,6 +177,9 @@ class AudioRecorder:
                 self.logger.error(f"Error closing audio stream: {e}")
             finally:
                 self.stream = None
+        
+        # 播放结束录音提示音
+        self._play_beep(is_start=False)
         
         # 使用锁保护帧操作并保存录音
         try:
@@ -234,7 +209,28 @@ class AudioRecorder:
             wf.setframerate(16000)
             wf.writeframes(b''.join(frames))
             wf.close()
-            self.logger.info(f"Recording saved to {filename}")
+            
+            # 计算录音统计信息
+            file_size = os.path.getsize(filename) / (1024 * 1024)  # MB
+            duration = self.end_time - self.start_time if self.end_time and self.start_time else 0
+            
+            # 读取音频文件内容计算字符数
+            try:
+                with open(filename, 'rb') as f:
+                    audio_data = f.read()
+                    char_count = len(audio_data)
+                    chinese_count = sum(1 for c in audio_data if 0x4E00 <= c <= 0x9FFF)
+            except Exception as e:
+                self.logger.warning(f"计算字符数失败: {e}")
+                char_count = 0
+                chinese_count = 0
+            
+            self.logger.info(f"录音统计信息：")
+            self.logger.info(f"- 文件大小: {file_size:.2f}MB")
+            self.logger.info(f"- 录音时长: {duration:.2f}秒")
+            self.logger.info(f"- 字符数: {char_count}")
+            self.logger.info(f"- 中文字数: {chinese_count}")
+            
             return True
         except Exception as e:
             self.logger.error(f"Error saving recording: {str(e)}")

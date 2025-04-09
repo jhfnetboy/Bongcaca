@@ -102,55 +102,75 @@ def test_text_input():
     
     logger.info("文本输入测试完成")
 
-def play_notification_sound():
-    """播放提示音以提示转写完成"""
+def play_start_beep():
+    """播放开始录音提示音（单声嘟）"""
     try:
-        # 使用PyAudio播放简短提示音
-        try:
-            import pyaudio
-            import numpy as np
-            
-            pa = pyaudio.PyAudio()
-            beep_stream = pa.open(
-                format=pyaudio.paFloat32,
-                channels=1,
-                rate=16000,
-                output=True
-            )
-            
-            # 生成提示音（440Hz和880Hz，各200ms）
-            duration = 0.2  # 秒
-            volume = 0.5   # 音量（0.0-1.0）
-            fs = 16000     # 采样率
-            
-            # 第一个音（440Hz）
-            samples1 = (np.sin(2*np.pi*np.arange(fs*duration)*440/fs)).astype(np.float32)
-            samples1 = samples1 * volume
-            
-            # 短暂停顿
-            pause = np.zeros(int(fs*0.1), dtype=np.float32)
-            
-            # 第二个音（880Hz）
-            samples2 = (np.sin(2*np.pi*np.arange(fs*duration)*880/fs)).astype(np.float32)
-            samples2 = samples2 * volume
-            
-            # 合并两个提示音
-            samples = np.concatenate([samples1, pause, samples2])
-            
-            # 播放提示音
-            beep_stream.write(samples.tobytes())
-            
-            # 关闭流
-            beep_stream.stop_stream()
-            beep_stream.close()
-            pa.terminate()
-            
-            logger.debug("播放转写完成提示音")
-            
-        except Exception as e:
-            logger.warning(f"播放提示音失败: {e}")
+        import pyaudio
+        import numpy as np
+        
+        pa = pyaudio.PyAudio()
+        beep_stream = pa.open(
+            format=pyaudio.paFloat32,
+            channels=1,
+            rate=16000,
+            output=True
+        )
+        
+        # 生成提示音（440Hz，200ms）
+        duration = 0.2  # 秒
+        volume = 0.3   # 音量（0.0-1.0）
+        fs = 16000     # 采样率
+        samples = (np.sin(2*np.pi*np.arange(fs*duration)*440/fs)).astype(np.float32)
+        samples = samples * volume
+        
+        # 播放提示音
+        beep_stream.write(samples.tobytes())
+        
+        # 关闭流
+        beep_stream.stop_stream()
+        beep_stream.close()
+        pa.terminate()
+        
     except Exception as e:
-        logger.error(f"播放通知声音过程中出错: {e}")
+        logger.warning(f"播放提示音失败: {e}")
+
+def play_complete_beep():
+    """播放转写完成提示音（两声滴）"""
+    try:
+        import pyaudio
+        import numpy as np
+        
+        pa = pyaudio.PyAudio()
+        beep_stream = pa.open(
+            format=pyaudio.paFloat32,
+            channels=1,
+            rate=16000,
+            output=True
+        )
+        
+        # 生成两声提示音（880Hz，各200ms）
+        duration = 0.2  # 秒
+        volume = 0.3   # 音量（0.0-1.0）
+        fs = 16000     # 采样率
+        pause = np.zeros(int(fs*0.1), dtype=np.float32)  # 100ms的间隔
+        
+        # 生成两个音调
+        beep1 = (np.sin(2*np.pi*np.arange(fs*duration)*880/fs)).astype(np.float32) * volume
+        beep2 = (np.sin(2*np.pi*np.arange(fs*duration)*880/fs)).astype(np.float32) * volume
+        
+        # 合并音频
+        samples = np.concatenate([beep1, pause, beep2])
+        
+        # 播放提示音
+        beep_stream.write(samples.tobytes())
+        
+        # 关闭流
+        beep_stream.stop_stream()
+        beep_stream.close()
+        pa.terminate()
+        
+    except Exception as e:
+        logger.warning(f"播放提示音失败: {e}")
 
 def transcribe_audio(audio_file, model_type="large-v3", language="zh", initial_prompt=None, target_language=None):
     """从音频文件转写文本
@@ -180,240 +200,86 @@ def transcribe_audio(audio_file, model_type="large-v3", language="zh", initial_p
     
     return result
 
-def run_recording_loop(window, engine, recorder):
-    """录音和转写的主循环
-    Args:
-        window: 主窗口对象，用于更新UI
-        engine: WhisperEngine对象
-        recorder: AudioRecorder对象
-    """
-    logger = logging.getLogger(__name__)
-    logger.debug("开始录音循环")
-    
-    # 获取当前设置的语言选项和模式
-    selected_language = window.target_language if window.target_language != "auto" else "zh"
-    is_realtime_mode = window.transcription_mode == "realtime"
-    target_language = None if window.target_language == "auto" else window.target_language
-    
-    logger.info(f"录音设置 - 模式: {window.transcription_mode}, 语言: {selected_language}, 翻译目标: {target_language}")
-    
-    # 设置最大录音时间为5分钟
-    timeout = time.time() + 300  # 5分钟超时
-    
+def run_recording_loop(window, recorder, engine, config):
+    """运行录音循环"""
     try:
-        # 开始录音
-        recorder.start_recording(
-            device_index=window.get_selected_device_id(), 
-            realtime_mode=is_realtime_mode
-        )
-        
-        # 设置录音状态
-        window.update_recording_state(True)
-        window.update_status("正在录音...")
-        
-        # 实时转写的累积文本
-        realtime_text = ""
-        last_transcribe_time = time.time()
-        
-        # 监听录音循环
-        while window.is_recording:
-            if time.time() > timeout:
-                logger.info("录音超时，自动停止")
-                window.update_status("录音超时，自动停止")
-                break
+        while True:
+            # 等待录音信号
+            window.toggle_recording_signal.wait()
+            
+            # 获取当前选择的设备ID
+            device_id = window.get_selected_device_id()
+            if device_id is None:
+                window.logger.error("未选择录音设备")
+                continue
                 
-            # 更新音频电平
+            # 获取当前选择的语言
+            language = window.get_selected_language()
+            if language is None:
+                language = "auto"  # 默认使用中文
+                
+            # 确保模型已加载
+            if not engine.model:
+                try:
+                    window.logger.info("正在加载模型...")
+                    engine.ensure_model_loaded()
+                except Exception as e:
+                    window.logger.error(f"加载模型失败: {e}")
+                    continue
+            
+            # 开始录音
+            window.logger.info("开始录音")
+            if not recorder.start_recording(device_id):
+                window.logger.error("启动录音失败")
+                continue
+                
+            # 播放开始录音提示音
+            play_start_beep()
+            
+            # 更新UI状态
+            window.update_recording_state(True)
+            
+            # 等待录音结束
+            window.toggle_recording_signal.wait()
+            
+            # 停止录音
+            window.logger.info("停止录音")
+            audio_file = recorder.stop()
+            if not audio_file:
+                window.logger.error("停止录音失败")
+                continue
+                
+            # 更新UI状态
+            window.update_recording_state(False)
+            
+            # 转写录音
+            window.logger.info(f"开始转写录音文件: {audio_file}")
             try:
-                from PySide6.QtWidgets import QApplication
-                level = recorder.current_audio_level
-                window.update_audio_level(level)
-                QApplication.processEvents()
-                
-                # 实时转写模式处理
-                if is_realtime_mode and time.time() - last_transcribe_time > 2.0:  # 每2秒尝试一次实时转写
-                    # 使用引擎进行实时转写
-                    transcript = engine.get_realtime_transcription(
-                        language=selected_language, 
-                        target_language=target_language
-                    )
-                    
-                    if transcript:
-                        # 更新UI显示转写结果
-                        window.update_result(transcript)
-                        realtime_text = transcript
-                        
-                    last_transcribe_time = time.time()
-            except Exception as e:
-                logger.error(f"录音循环中出错: {e}")
-                window.update_status(f"录音过程中出错: {str(e)}")
-                
-            time.sleep(0.05)  # 降低CPU使用率
-            
-        # 停止录音
-        logger.info("停止录音")
-        window.update_status("正在处理录音...")
-        file_path = recorder.stop()
-        
-        # 如果是批量模式或实时模式没有得到结果，则进行完整转写
-        if file_path and os.path.exists(file_path):
-            if not is_realtime_mode or not realtime_text:
-                logger.info(f"开始转写录音文件: {file_path}")
-                window.update_status("正在转写...")
-                
-                # 进行完整转写
                 result = engine.transcribe(
-                    audio_file=file_path,
-                    language=selected_language,
-                    target_language=target_language
+                    audio_file,
+                    language=language
                 )
-                
                 if result:
-                    # 更新UI显示转写结果
                     window.update_result(result)
-                    window.update_status("转写完成")
-                    
-                    # 播放提示音
-                    play_notification_sound()
+                    # 播放转写完成提示音
+                    play_complete_beep()
                 else:
-                    window.update_status("转写未能得到结果")
-            else:
-                # 实时模式已有结果
-                window.update_status("实时转写完成")
+                    window.logger.error("转写失败")
+            except Exception as e:
+                window.logger.error(f"录音转写过程中出错: {str(e)}")
+                window.logger.error(str(e))
+                import traceback
+                window.logger.error(traceback.format_exc())
                 
-                # 播放提示音
-                play_notification_sound()
-        else:
-            logger.error("录音文件保存失败或不存在")
-            window.update_status("录音保存失败，请重试")
-            
     except Exception as e:
-        logger.error(f"录音转写过程中出错: {e}")
-        logger.exception(e)
-        window.update_status(f"处理过程中出错: {str(e)}")
+        window.logger.error(f"录音循环出错: {str(e)}")
+        import traceback
+        window.logger.error(traceback.format_exc())
     finally:
-        # 恢复UI状态
+        # 清理资源
+        if recorder:
+            recorder.stop()
         window.update_recording_state(False)
-        window.update_audio_level(0)
-        logger.debug("录音循环结束")
-
-def on_toggle_recording(window, engine, recorder):
-    """处理录音按钮点击事件"""
-    # 如果当前正在录音，则停止录音
-    if window.is_recording:
-        logger.debug("停止录音")
-        window.update_status("正在停止录音...")
-        window.is_recording = False
-        window.update_recording_state(False)
-        
-        # 如果有正在运行的录音线程，等待其结束
-        if hasattr(window, "_recording_thread") and window._recording_thread and window._recording_thread.is_alive():
-            # 这里不需要做什么，线程会自行检测录音状态并退出
-            pass
-            
-        return
-        
-    # 开始新的录音
-    device_id = window.get_selected_device_id()
-    if device_id is None:
-        logger.error("没有选择输入设备")
-        window.update_status("错误: 没有选择输入设备")
-        return
-        
-    # 获取语言设置
-    language = window.get_selected_language()
-    target_language = window.get_target_language()
-    mode = window.transcription_mode
-    
-    logger.debug(f"开始录音，使用设备ID: {device_id}, 语言: {language}, 目标语言: {target_language}, 模式: {mode}")
-    
-    # 确保模型已加载
-    try:
-        # 先检查模型是否已加载
-        if engine.model is None:
-            logger.info("模型尚未加载，正在加载...")
-            window.update_status("正在加载模型...")
-            
-        engine.ensure_model_loaded()
-        logger.info(f"使用模型: {engine.model_name}")
-    except Exception as e:
-        logger.error(f"加载模型失败: {e}")
-        window.update_status(f"加载模型失败: {str(e)}")
-        return
-        
-    # 显式设置录音设备
-    try:
-        # 确保设备初始化
-        if recorder.device_index != device_id:
-            logger.info(f"设置录音设备: {device_id}")
-            
-        recorder.set_device(device_id)
-        logger.info(f"已设置录音设备: {device_id}")
-    except Exception as e:
-        logger.error(f"设置录音设备失败: {e}")
-        window.update_status(f"设置录音设备失败: {str(e)}")
-        return
-        
-    # 设置录音状态
-    window.is_recording = True
-    window.update_recording_state(True)
-    window.update_status("录音中...")
-    
-    # 使用线程进行录音和转写
-    window._recording_thread = threading.Thread(
-        target=run_recording_loop, 
-        args=(window, engine, recorder)
-    )
-    window._recording_thread.daemon = True
-    window._recording_thread.start()
-    
-    # 确保线程成功启动
-    time.sleep(0.1)
-    if not window._recording_thread.is_alive():
-        logger.error("录音线程启动失败")
-        window.is_recording = False
-        window.update_recording_state(False)
-        window.update_status("录音线程启动失败")
-        return
-        
-    logger.info("录音线程启动成功")
-
-def on_model_change(window, engine, model_name):
-    """处理模型变更事件"""
-    # 检查是否正在录音
-    if window.is_recording:
-        logger.warning("无法在录音过程中更改模型")
-        window.update_status("请先停止录音，然后再更改模型")
-        return
-        
-    logger.info(f"切换到模型: {model_name}")
-    window.update_status(f"正在切换到模型: {model_name}...")
-    
-    # 重置引擎状态
-    engine.model = None
-    engine.initialized = False
-    
-    # 强制设置模型名称
-    engine.settings = {
-        "model_name": model_name,
-        "device": "cpu",
-        "compute_type": "int8",
-        "beam_size": 5,
-        "threads": min(os.cpu_count(), 8)  # 使用多线程
-    }
-    
-    try:
-        # 显示正在加载的提示
-        window.update_status(f"正在加载模型 {model_name}...")
-        logger.info(f"开始加载模型: {model_name}")
-        
-        # 重新加载模型
-        engine.ensure_model_loaded()
-        
-        window.update_status(f"已切换到模型: {model_name}")
-        logger.info(f"模型切换成功: {model_name}")
-    except Exception as e:
-        logger.error(f"切换模型失败: {e}")
-        window.update_status(f"切换模型失败: {str(e)}")
 
 def main():
     """主函数"""
@@ -440,10 +306,12 @@ def main():
     # 清理旧录音文件，仅保留最近3个
     cleanup_old_recordings(keep_recent=3)
     
-    # 导入组件
     try:
+        # 导入必要的组件
         from core.engine import WhisperEngine
         from core.recorder import AudioRecorder
+        from PySide6.QtWidgets import QApplication
+        from ui.floating_window import FloatingWindow
         
         # 初始化语音引擎
         engine = WhisperEngine(config)
@@ -451,22 +319,7 @@ def main():
         # 初始化录音器
         recorder = AudioRecorder()
         
-        # 设置回调
-        def setup_callbacks(window):
-            window.on_toggle_recording = lambda: on_toggle_recording(window, engine, recorder)
-            # 连接信号到回调函数
-            window.toggle_recording_signal.connect(lambda: on_toggle_recording(window, engine, recorder))
-            # 连接设备变更信号
-            window.device_changed.connect(recorder.set_device)
-            # 连接模式切换信号
-            window.transcription_mode_changed.connect(lambda mode: logger.info(f"转写模式已切换为: {mode}"))
-            # 连接模型变更信号
-            window.model_changed.connect(lambda model: on_model_change(window, engine, model))
-        
-        # 运行GUI应用
-        from PySide6.QtWidgets import QApplication
-        from ui.floating_window import FloatingWindow
-        
+        # 创建QApplication实例
         app = QApplication([])
         
         # 设置MacOS Dock图标
@@ -477,11 +330,29 @@ def main():
             except Exception as e:
                 logger.error(f"设置MacOS Dock图标失败: {e}")
         
+        # 创建主窗口
         window = FloatingWindow(config)
-        setup_callbacks(window)
+        
+        # 设置回调函数
+        def setup_callbacks():
+            # 录音控制回调
+            window.toggle_recording_signal.connect(lambda: run_recording_loop(window, recorder, engine, config))
+            # 连接设备变更信号
+            window.device_changed.connect(recorder.set_device)
+            # 连接模式切换信号
+            window.transcription_mode_changed.connect(lambda mode: logger.info(f"转写模式已切换为: {mode}"))
+            # 连接模型变更信号
+            window.model_changed.connect(lambda model: on_model_change(window, engine, model))
+        
+        # 设置回调
+        setup_callbacks()
+        
+        # 显示窗口
         window.show()
         
+        # 运行应用程序
         sys.exit(app.exec())
+        
     except ImportError as e:
         logger.critical(f"无法导入必要的模块: {e}")
         print(f"缺少必要的依赖: {e}")
@@ -493,4 +364,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()
