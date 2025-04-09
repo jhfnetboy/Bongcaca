@@ -10,6 +10,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 import time
+import wave
 
 # 设置环境变量以避免OpenMP冲突
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -280,8 +281,14 @@ class WhisperEngine:
             print(f"下载模型失败: {str(e)}")
             return None
     
-    def transcribe(self, audio_file: str) -> str:
-        """使用批量模式转写音频文件，返回完整文本"""
+    def transcribe(self, audio_file: str, language="zh", initial_prompt=None, target_language=None) -> str:
+        """使用批量模式转写音频文件，返回完整文本
+        Args:
+            audio_file: 音频文件路径
+            language: 音频的语言，默认为zh（中文），设置为auto则自动检测
+            initial_prompt: 初始提示，用于引导转写
+            target_language: 目标语言代码，用于翻译
+        """
         if not os.path.exists(audio_file):
             self.logger.error(f"音频文件不存在: {audio_file}")
             return "错误：音频文件不存在"
@@ -289,22 +296,31 @@ class WhisperEngine:
         try:
             self.ensure_model_loaded()
             
-            self.logger.info(f"Transcribing audio file: {audio_file}")
+            self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}, target_language: {target_language}")
             
             # 转写音频时捕获并安全释放资源
             try:
                 # 转写音频
                 beam_size = self.settings.get("beam_size", 5)
+                # faster-whisper支持的是task='translate'并指定language参数
+                task = "translate" if target_language else "transcribe"
                 segments, info = self.model.transcribe(
                     audio_file,
                     beam_size=beam_size,
-                    language="zh",
+                    language=None if language == "auto" else language,  # 如果是auto则设为None让模型自动检测
+                    initial_prompt=initial_prompt,
+                    task=task,  # 如果有target_language则是翻译任务
                     vad_filter=True,
                     vad_parameters=dict(min_silence_duration_ms=500)
                 )
                 
-                # 记录语言检测结果
-                self.logger.info(f"Detected language: {info.language} (probability: {info.language_probability})")
+                # 记录语言检测结果和翻译信息
+                detected_language = info.language if hasattr(info, "language") else "unknown"
+                language_probability = info.language_probability if hasattr(info, "language_probability") else 0.0
+                
+                self.logger.info(f"Detected language: {detected_language} (probability: {language_probability})")
+                if target_language:
+                    self.logger.info(f"Translating to: {target_language}")
                 
                 # 立即收集所有片段文本并释放segments引用，防止内存访问错误
                 transcript = ""
@@ -343,8 +359,12 @@ class WhisperEngine:
         self.buffer = []
         self.buffer_size = 0
         
-    def get_realtime_transcription(self) -> Optional[str]:
-        """实时转写当前缓冲区中的音频数据"""
+    def get_realtime_transcription(self, language="zh", target_language=None) -> Optional[str]:
+        """实时转写当前缓冲区中的音频数据
+        Args:
+            language: 音频的语言，默认为zh（中文），设置为auto则自动检测
+            target_language: 目标语言代码，用于翻译
+        """
         if not self.buffer or self.buffer_size == 0:
             return None
             
@@ -363,7 +383,6 @@ class WhisperEngine:
                 temp_file_path = os.path.join(temp_dir, f"whisper_temp_{int(time.time()*1000)}.wav")
                 
                 # 写入WAV头
-                import wave
                 wf = wave.open(temp_file_path, 'wb')
                 wf.setnchannels(1)
                 wf.setsampwidth(2)  # 16-bit
@@ -377,10 +396,13 @@ class WhisperEngine:
                 
                 # 转写临时文件
                 beam_size = self.settings.get("beam_size", 5)
+                # 使用task参数处理翻译任务
+                task = "translate" if target_language else "transcribe"
                 segments, info = self.model.transcribe(
                     temp_file_path,
                     beam_size=3,  # 使用较小的beam size以提高速度
-                    language="zh",
+                    language=None if language == "auto" else language,  # 如果是auto则设为None让模型自动检测
+                    task=task,  # 如果有target_language则是翻译任务
                     vad_filter=True,
                     vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
                     word_timestamps=False,  # 不需要单词级时间戳

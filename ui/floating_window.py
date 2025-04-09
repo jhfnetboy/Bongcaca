@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame
+from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame, QFormLayout, QLineEdit
 from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject, Slot, QSize, QUrl, QThread, QMetaObject, Q_ARG
 from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont, QPixmap, QPainterPath, QFontMetrics, QDesktopServices
 import numpy as np
@@ -9,6 +9,14 @@ import platform
 import subprocess
 from ui.logo import create_app_icon, create_logo_pixmap
 from version import get_version
+import tempfile
+import json
+import datetime
+import pyaudio
+import re
+import threading
+from typing import List, Dict, Any
+from pathlib import Path
 
 class AudioVisualizer(QWidget):
     def __init__(self, parent=None):
@@ -168,6 +176,7 @@ class FloatingWindow(QMainWindow):
         self.transcription_mode = "batch"  # 默认是批量模式
         self.available_models = []  # 可用模型列表
         self.last_transcription = ""  # 最近的转写结果
+        self.target_language = "auto"  # 默认不翻译，自动检测语言
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -208,36 +217,19 @@ class FloatingWindow(QMainWindow):
         # 创建设备选择标签
         device_label = QLabel("Select Input Device:")
         device_label.setAlignment(Qt.AlignCenter)
+        device_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         layout.addWidget(device_label)
         
         # 创建设备选择下拉框
         self.device_combo = QComboBox()
         self.device_combo.setStyleSheet("""
             QComboBox {
-                padding: 5px;
+                padding: 8px;
+                min-height: 30px;
                 border: 1px solid #ccc;
                 border-radius: 4px;
                 background-color: white;
-            }
-            QComboBox:disabled {
-                background-color: #f0f0f0;
-            }
-        """)
-        self.device_combo.currentIndexChanged.connect(self.on_device_changed)
-        layout.addWidget(self.device_combo)
-        
-        # 添加模型选择框
-        model_label = QLabel("Select Model:")
-        model_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(model_label)
-        
-        self.model_combo = QComboBox()
-        self.model_combo.setStyleSheet("""
-            QComboBox {
-                padding: 5px;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                background-color: white;
+                font-size: 14px;
             }
             QComboBox:disabled {
                 background-color: #f0f0f0;
@@ -248,6 +240,38 @@ class FloatingWindow(QMainWindow):
                 selection-background-color: #3778b7;
                 selection-color: white;
                 color: black;
+                font-size: 14px;
+            }
+        """)
+        self.device_combo.currentIndexChanged.connect(self.on_device_changed)
+        layout.addWidget(self.device_combo)
+        
+        # 添加模型选择框
+        model_label = QLabel("Select Model:")
+        model_label.setAlignment(Qt.AlignCenter)
+        model_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(model_label)
+        
+        self.model_combo = QComboBox()
+        self.model_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                min-height: 30px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: white;
+                font-size: 14px;
+            }
+            QComboBox:disabled {
+                background-color: #f0f0f0;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #ccc;
+                background-color: white;
+                selection-background-color: #3778b7;
+                selection-color: white;
+                color: black;
+                font-size: 14px;
             }
             QComboBox::drop-down {
                 subcontrol-origin: padding;
@@ -263,10 +287,12 @@ class FloatingWindow(QMainWindow):
         self.download_button = QPushButton("Download Model")
         self.download_button.setStyleSheet("""
             QPushButton {
-                padding: 5px;
+                padding: 8px;
+                min-height: 30px;
                 border: 1px solid #ccc;
                 border-radius: 4px;
                 background-color: #f0f0f0;
+                font-size: 14px;
             }
             QPushButton:hover {
                 background-color: #e0e0e0;
@@ -285,16 +311,14 @@ class FloatingWindow(QMainWindow):
         mode_frame.setStyleSheet("QFrame { background-color: #f0f0f0; border-radius: 4px; padding: 5px; }")
         mode_layout = QVBoxLayout(mode_frame)
         
-        mode_label = QLabel("Transcription Mode:")
-        mode_label.setAlignment(Qt.AlignCenter)
-        mode_layout.addWidget(mode_label)
-        
         mode_group = QButtonGroup(self)
         
         mode_buttons_layout = QHBoxLayout()
         self.batch_mode_radio = QRadioButton("Batch")
         self.batch_mode_radio.setChecked(True)  # 默认选中批量模式
+        self.batch_mode_radio.setStyleSheet("QRadioButton { font-size: 14px; min-height: 25px; }")
         self.realtime_mode_radio = QRadioButton("Realtime")
+        self.realtime_mode_radio.setStyleSheet("QRadioButton { font-size: 14px; min-height: 25px; }")
         
         mode_group.addButton(self.batch_mode_radio)
         mode_group.addButton(self.realtime_mode_radio)
@@ -307,6 +331,56 @@ class FloatingWindow(QMainWindow):
         self.batch_mode_radio.toggled.connect(self.on_mode_changed)
         
         layout.addWidget(mode_frame)
+        
+        # 添加语言翻译选择框
+        lang_frame = QFrame()
+        lang_frame.setFrameShape(QFrame.StyledPanel)
+        lang_frame.setStyleSheet("QFrame { background-color: #f0f0f0; border-radius: 4px; padding: 5px; }")
+        lang_layout = QVBoxLayout(lang_frame)
+        
+        self.lang_combo = QComboBox()
+        self.lang_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                min-height: 30px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: white;
+                font-size: 14px;
+            }
+            QComboBox:disabled {
+                background-color: #f0f0f0;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #ccc;
+                background-color: white;
+                selection-background-color: #3778b7;
+                selection-color: white;
+                color: black;
+                font-size: 14px;
+            }
+        """)
+        
+        # 添加支持的语言选项
+        languages = [
+            ("auto", "Auto Detect (不翻译)"),
+            ("en", "English (英文)"),
+            ("zh", "中文"),
+            ("ja", "日本語 (日文)"),
+            ("ko", "한국어 (韩文)"),
+            ("de", "Deutsch (德文)"),
+            ("fr", "Français (法文)"),
+            ("es", "Español (西班牙文)"),
+            ("th", "ภาษาไทย (泰文)")
+        ]
+        
+        for code, name in languages:
+            self.lang_combo.addItem(name, code)
+            
+        self.lang_combo.currentIndexChanged.connect(self.on_target_language_changed)
+        lang_layout.addWidget(self.lang_combo)
+        
+        layout.addWidget(lang_frame)
         
         # 创建录音按钮
         self.toggle_button = ToggleButton()
@@ -324,7 +398,7 @@ class FloatingWindow(QMainWindow):
         self.status_label.setStyleSheet("""
             QLabel {
                 color: #666;
-                font-size: 12px;
+                font-size: 13px;
             }
         """)
         layout.addWidget(self.status_label)
@@ -347,7 +421,7 @@ class FloatingWindow(QMainWindow):
         self.logger.addHandler(self.LogHandler(self))
         
         # 设置窗口大小
-        self.setFixedSize(400, 600)
+        self.setFixedSize(400, 650)
         
         # 初始化设备列表
         self.init_device_list()
@@ -571,6 +645,19 @@ class FloatingWindow(QMainWindow):
         if self.device_combo.count() == 0:
             return None
         return self.device_combo.currentData()
+        
+    def get_selected_language(self):
+        """获取当前选择的语言，如果是auto则返回中文(zh)"""
+        lang = self.target_language
+        if lang == "auto":
+            return "zh"  # 默认使用中文
+        return lang
+        
+    def get_target_language(self):
+        """获取目标翻译语言，如果是auto则返回None表示不翻译"""
+        if self.target_language == "auto":
+            return None
+        return self.target_language
         
     def update_status(self, status_text):
         """更新状态文本"""
@@ -828,10 +915,10 @@ class FloatingWindow(QMainWindow):
                 dialog.setText("请选择要下载的模型：\n(下载过程中程序可能会暂时无响应)")
                 
                 # 添加模型选择按钮
-                buttons = []
-                for idx, (name, info, _) in enumerate(models_to_download):
+                button_model_map = {}  # 使用字典存储按钮和模型的映射关系
+                for name, info, _ in models_to_download:
                     button = dialog.addButton(f"{name} ({info})", QMessageBox.ButtonRole.ActionRole)
-                    buttons.append((button, name))
+                    button_model_map[button] = name  # 将按钮对象和模型名称关联
                 
                 cancel_button = dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
                 
@@ -844,12 +931,8 @@ class FloatingWindow(QMainWindow):
                     self.logger.info("用户取消了模型下载")
                     return
                 
-                # 查找点击的按钮对应的模型名称
-                model_name = None
-                for button, name in buttons:
-                    if clicked_button == button:
-                        model_name = name
-                        break
+                # 从字典中直接获取点击按钮对应的模型名称
+                model_name = button_model_map.get(clicked_button)
                 
                 # 如果没有找到对应的模型名称，返回
                 if not model_name:
@@ -1027,6 +1110,16 @@ class FloatingWindow(QMainWindow):
         """显示关于对话框"""
         dialog = AboutDialog(self)
         dialog.exec()
+
+    def on_target_language_changed(self, index):
+        """目标语言切换事件"""
+        if index >= 0:
+            lang_code = self.lang_combo.currentData()
+            lang_name = self.lang_combo.currentText()
+            self.target_language = lang_code
+            self.logger.info(f"目标语言已切换为: {lang_name} (代码: {lang_code})")
+            # 更新状态栏
+            self.status_label.setText(f"目标语言: {lang_name}")
 
     class LogHandler(logging.Handler):
         def __init__(self, window):

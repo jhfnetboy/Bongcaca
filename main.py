@@ -152,147 +152,149 @@ def play_notification_sound():
     except Exception as e:
         logger.error(f"播放通知声音过程中出错: {e}")
 
-def run_recording_loop(window, engine, recorder, max_duration=300):
-    """录音循环，处理音频录制和转写"""
+def transcribe_audio(audio_file, model_type="large-v3", language="zh", initial_prompt=None, target_language=None):
+    """从音频文件转写文本
+    Args:
+        audio_file: 音频文件路径
+        model_type: 要使用的模型类型
+        language: 音频的语言，可以是auto或特定语言代码
+        initial_prompt: 初始提示，用于引导转写
+        target_language: 目标语言代码，用于翻译
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"使用模型 {model_type} 转写音频 {audio_file}, 语言: {language}, 目标语言: {target_language}")
+    
+    # 初始化引擎
+    from core.engine import WhisperEngine
+    engine = WhisperEngine(config)
+    engine.ensure_model_loaded()
+    
+    # 转写
+    result = engine.transcribe(
+        audio_file=audio_file, 
+        language=language, 
+        initial_prompt=initial_prompt, 
+        target_language=target_language
+    )
+    logger.info(f"转写结果: {result}")
+    
+    return result
+
+def run_recording_loop(window, engine, recorder):
+    """录音和转写的主循环
+    Args:
+        window: 主窗口对象，用于更新UI
+        engine: WhisperEngine对象
+        recorder: AudioRecorder对象
+    """
+    logger = logging.getLogger(__name__)
     logger.debug("开始录音循环")
     
+    # 获取当前设置的语言选项和模式
+    selected_language = window.target_language if window.target_language != "auto" else "zh"
+    is_realtime_mode = window.transcription_mode == "realtime"
+    target_language = None if window.target_language == "auto" else window.target_language
+    
+    logger.info(f"录音设置 - 模式: {window.transcription_mode}, 语言: {selected_language}, 翻译目标: {target_language}")
+    
+    # 设置最大录音时间为5分钟
+    timeout = time.time() + 300  # 5分钟超时
+    
     try:
-        # 根据选择的模式启动录音
-        if window.transcription_mode == "realtime":
-            # 实时模式 - 使用回调函数
-            logger.debug("使用实时转写模式")
-            last_transcription = ""  # 保存上次的转写结果
-            last_update_time = time.time()  # 上次更新UI的时间
-            
-            def realtime_callback(audio_chunk, level):
-                nonlocal last_transcription, last_update_time
-                # 添加音频块到引擎缓冲区
-                engine.add_audio_chunk(audio_chunk)
-                
-                # 更新UI音频电平
-                window.update_audio_level(level)
-                
-                # 获取实时转写结果
-                current_time = time.time()
-                # 确保至少每1秒尝试一次转写，避免过于频繁
-                if current_time - last_update_time >= 1.0:
-                    result = engine.get_realtime_transcription()
-                    if result and result != last_transcription:
-                        window.update_result(result)
-                        window.update_status(f"实时转写中... ({len(engine.buffer)} 个块)")
-                        last_transcription = result
-                        last_update_time = current_time
-                        # 清除过旧的缓冲区数据，只保留最近的数据，减轻处理负担
-                        if len(engine.buffer) > 20:  # 保留约10秒的音频
-                            engine.buffer = engine.buffer[-20:]
-                            engine.buffer_size = sum(len(chunk) for chunk in engine.buffer)
-                            logger.debug(f"裁剪音频缓冲区至 {engine.buffer_size} 字节")
-            
-            logger.debug("启动音频录制器(实时模式)")
-            recorder.start_recording(
-                device_index=recorder.device_index, 
-                realtime_mode=True, 
-                realtime_callback=realtime_callback
-            )
-        else:
-            # 批量模式 - 标准录音
-            logger.debug("使用批量转写模式")
-            logger.debug("启动音频录制器(批量模式)")
-            recorder.start_recording(device_index=recorder.device_index)
+        # 开始录音
+        recorder.start_recording(
+            device_index=window.get_selected_device_id(), 
+            realtime_mode=is_realtime_mode
+        )
         
-        start_time = time.time()
+        # 设置录音状态
+        window.update_recording_state(True)
         window.update_status("正在录音...")
         
-        # 录音循环
-        while window.is_recording and (time.time() - start_time) < max_duration:
-            try:
-                # 更新音频电平 (仅批量模式需要，实时模式在回调中处理)
-                if window.transcription_mode == "batch":
-                    level = recorder.get_audio_level()
-                    window.update_audio_level(level)
-                    
-                    # 每0.5秒记录一次音频电平(从原来的5秒改为0.5秒)
-                    current_time = time.time()
-                    if current_time - start_time - int(current_time - start_time) < 0.05:
-                        logger.debug(f"当前音频电平: {level:.2f}")
-                
-                # 短暂休眠
-                time.sleep(0.05)
-            except Exception as e:
-                logger.error(f"录音循环中发生错误: {e}")
-                window.update_status(f"录音错误: {str(e)}")
+        # 实时转写的累积文本
+        realtime_text = ""
+        last_transcribe_time = time.time()
+        
+        # 监听录音循环
+        while window.is_recording:
+            if time.time() > timeout:
+                logger.info("录音超时，自动停止")
+                window.update_status("录音超时，自动停止")
                 break
-        
-        # 检查是否因超时而停止
-        if (time.time() - start_time) >= max_duration:
-            logger.info("录音达到最大时间限制，自动停止")
-            window.update_status("录音时间达到限制，已停止")
-            window.toggle_recording()  # 更新UI状态
-            return
-        
-        # 停止录音并获取文件
-        logger.debug("停止音频录制器")
-        audio_file = recorder.stop()
-        
-        # 在批量模式下进行文件转写
-        if window.transcription_mode == "batch" and audio_file and os.path.exists(audio_file):
-            # 记录录音文件信息
-            file_size = os.path.getsize(audio_file)
-            file_size_mb = file_size / (1024 * 1024)
-            recording_duration = time.time() - start_time
-            
-            logger.info(f"录音文件保存到: {audio_file} (大小: {file_size_mb:.2f}MB, 时长: {recording_duration:.2f}秒)")
-            window.update_status("转写中...")
-            
-            # 开始计时转写过程
-            transcribe_start_time = time.time()
-            
-            # 转写音频
+                
+            # 更新音频电平
             try:
-                logger.debug(f"开始转写音频文件: {audio_file}")
-                result = engine.transcribe(audio_file)
+                from PySide6.QtWidgets import QApplication
+                level = recorder.current_audio_level
+                window.update_audio_level(level)
+                QApplication.processEvents()
                 
-                # 计算转写时间
-                transcribe_time = time.time() - transcribe_start_time
-                
-                if not result or not result.strip():
-                    logger.warning("转写结果为空")
-                    window.update_status("转写完成，但结果为空")
-                    return
-                
-                # 计算字符数和中文字数
-                char_count = len(result)
-                chinese_char_count = sum(1 for char in result if '\u4e00' <= char <= '\u9fff')
-                
-                # 记录详细统计信息
-                stats_msg = (
-                    f"录音统计: 文件大小={file_size_mb:.2f}MB, 录音时长={recording_duration:.2f}秒, "
-                    f"转写时间={transcribe_time:.2f}秒, 字符数={char_count}, 中文字数={chinese_char_count}, "
-                    f"使用模型={engine.model_name}"
-                )
-                logger.info(stats_msg)
-                window.result_text.append(f"\n--- {stats_msg} ---\n")
-                
-                logger.info(f"转写结果: {result}")
-                window.update_result(result)
-                window.update_status("转写完成")
-                
-                # 转写完成后播放提示音
-                play_notification_sound()
-                
+                # 实时转写模式处理
+                if is_realtime_mode and time.time() - last_transcribe_time > 2.0:  # 每2秒尝试一次实时转写
+                    # 使用引擎进行实时转写
+                    transcript = engine.get_realtime_transcription(
+                        language=selected_language, 
+                        target_language=target_language
+                    )
+                    
+                    if transcript:
+                        # 更新UI显示转写结果
+                        window.update_result(transcript)
+                        realtime_text = transcript
+                        
+                    last_transcribe_time = time.time()
             except Exception as e:
-                logger.error(f"转写音频失败: {e}")
-                window.update_status(f"转写失败: {str(e)}")
+                logger.error(f"录音循环中出错: {e}")
+                window.update_status(f"录音过程中出错: {str(e)}")
+                
+            time.sleep(0.05)  # 降低CPU使用率
+            
+        # 停止录音
+        logger.info("停止录音")
+        window.update_status("正在处理录音...")
+        file_path = recorder.stop()
+        
+        # 如果是批量模式或实时模式没有得到结果，则进行完整转写
+        if file_path and os.path.exists(file_path):
+            if not is_realtime_mode or not realtime_text:
+                logger.info(f"开始转写录音文件: {file_path}")
+                window.update_status("正在转写...")
+                
+                # 进行完整转写
+                result = engine.transcribe(
+                    audio_file=file_path,
+                    language=selected_language,
+                    target_language=target_language
+                )
+                
+                if result:
+                    # 更新UI显示转写结果
+                    window.update_result(result)
+                    window.update_status("转写完成")
+                    
+                    # 播放提示音
+                    play_notification_sound()
+                else:
+                    window.update_status("转写未能得到结果")
+            else:
+                # 实时模式已有结果
+                window.update_status("实时转写完成")
+                
+                # 播放提示音
+                play_notification_sound()
+        else:
+            logger.error("录音文件保存失败或不存在")
+            window.update_status("录音保存失败，请重试")
+            
     except Exception as e:
-        logger.error(f"录音过程中发生错误: {e}")
-        window.update_status(f"录音失败: {str(e)}")
+        logger.error(f"录音转写过程中出错: {e}")
+        logger.exception(e)
+        window.update_status(f"处理过程中出错: {str(e)}")
     finally:
-        # 确保录音已停止
-        try:
-            if hasattr(recorder, 'stop') and recorder.is_recording:
-                recorder.stop()
-        except Exception as e:
-            logger.error(f"停止录音时发生错误: {e}")
+        # 恢复UI状态
+        window.update_recording_state(False)
+        window.update_audio_level(0)
+        logger.debug("录音循环结束")
 
 def on_toggle_recording(window, engine, recorder):
     """处理录音按钮点击事件"""
@@ -317,7 +319,12 @@ def on_toggle_recording(window, engine, recorder):
         window.update_status("错误: 没有选择输入设备")
         return
         
-    logger.debug(f"开始录音，使用设备ID: {device_id}")
+    # 获取语言设置
+    language = window.get_selected_language()
+    target_language = window.get_target_language()
+    mode = window.transcription_mode
+    
+    logger.debug(f"开始录音，使用设备ID: {device_id}, 语言: {language}, 目标语言: {target_language}, 模式: {mode}")
     
     # 确保模型已加载
     try:
