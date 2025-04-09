@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame
+from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame, QApplication, QSlider, QPlainTextEdit, QMenu, QDialog
 from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject, Slot, QSize, QUrl, QThread, QMetaObject, Q_ARG
 from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont, QPixmap, QPainterPath, QFontMetrics, QDesktopServices
 import numpy as np
@@ -9,6 +9,13 @@ import platform
 import subprocess
 from ui.logo import create_app_icon, create_logo_pixmap
 from version import get_version
+
+# 添加WindowSignals类定义
+class WindowSignals(QObject):
+    """与主应用程序通信的信号类"""
+    start_recording = Signal(int, str)  # 设备索引, 语言
+    stop_recording = Signal()
+    download_model = Signal(str)  # 模型名称
 
 class AudioVisualizer(QWidget):
     def __init__(self, parent=None):
@@ -112,7 +119,7 @@ class AboutDialog(QMessageBox):
         # 使用HTML格式，支持链接
         about_text = f"""
         <h2>Voice Typer v{get_version()}</h2>
-        <p>一个开源的本地语音输入工具，支持中英文语音识别</p>
+        <p>蹦擦擦，BongCaCa，一个开源的本地语音输入工具，支持中英文语音识别</p>
         <p>支持平台: macOS, Windows</p>
         <p>作者: <a href="https://blog.jlab.tech/about">JLab</a></p>
         <p>GitHub: <a href="https://github.com/jhfnetboy/Bongcaca">@jhfnetboy/Bongcaca</a></p>
@@ -140,7 +147,7 @@ class AboutDialog(QMessageBox):
 
 class FloatingWindow(QMainWindow):
     # 定义自定义信号
-    toggle_recording_signal = Signal()
+    toggle_recording_signal = Signal(int, str)  # 设备ID, 语言
     transcription_mode_changed = Signal(str)  # 新增模式切换信号
     model_changed = Signal(str)  # 新增模型切换信号
     
@@ -222,9 +229,28 @@ class FloatingWindow(QMainWindow):
             QComboBox:disabled {
                 background-color: #f0f0f0;
             }
+            QComboBox QAbstractItemView {
+                border: 1px solid #ccc;
+                background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                selection-background-color: #3778b7;
+                selection-color: white;
+            }
         """)
         self.device_combo.currentIndexChanged.connect(self.on_device_changed)
         layout.addWidget(self.device_combo)
+        
+        # 添加语言选择框
+        language_label = QLabel("Translate Your Voice To:")
+        language_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(language_label)
+        
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("自动（识别语言）", "auto")
+        self.language_combo.addItem("中文", "zh")
+        self.language_combo.addItem("英文", "en")
+        self.language_combo.addItem("泰文", "th")
+        self.language_combo.setCurrentIndex(0)  # 默认选择自动检测
+        layout.addWidget(self.language_combo)
         
         # 添加模型选择框
         model_label = QLabel("Select Model:")
@@ -244,16 +270,9 @@ class FloatingWindow(QMainWindow):
             }
             QComboBox QAbstractItemView {
                 border: 1px solid #ccc;
-                background-color: white;
+                background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
                 selection-background-color: #3778b7;
                 selection-color: white;
-                color: black;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 15px;
-                border-left: 1px solid #ccc;
             }
         """)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
@@ -430,7 +449,7 @@ class FloatingWindow(QMainWindow):
             
         self.logger.debug(f"切换录音状态,当前状态: {self.is_recording}")
         # 发射信号,让main.py处理实际逻辑
-        self.toggle_recording_signal.emit()
+        self.toggle_recording_signal.emit(self.get_selected_device_id(), self.get_language())
         
     def init_device_list(self):
         """初始化设备列表"""
@@ -444,6 +463,25 @@ class FloatingWindow(QMainWindow):
             
             # 清空下拉框
             self.device_combo.clear()
+            
+            # 设置下拉菜单样式，增加背景透明度
+            self.device_combo.setStyleSheet("""
+                QComboBox {
+                    padding: 5px;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: white;
+                }
+                QComboBox:disabled {
+                    background-color: #f0f0f0;
+                }
+                QComboBox QAbstractItemView {
+                    border: 1px solid #ccc;
+                    background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                    selection-background-color: #3778b7;
+                    selection-color: white;
+                }
+            """)
             
             # 记录输入设备
             input_devices = []
@@ -481,7 +519,7 @@ class FloatingWindow(QMainWindow):
             self.logger.error(f"初始化设备列表失败: {e}")
             self.status_label.setText(f"初始化设备失败: {str(e)}")
             self.device_initialized = False
-            
+
     def on_device_changed(self, index):
         """设备切换事件"""
         if index >= 0:
@@ -605,6 +643,25 @@ class FloatingWindow(QMainWindow):
             self.model_combo.clear()
             self.available_models = []
             
+            # 设置下拉菜单样式，增加背景透明度
+            self.model_combo.setStyleSheet("""
+                QComboBox {
+                    padding: 5px;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: white;
+                }
+                QComboBox:disabled {
+                    background-color: #f0f0f0;
+                }
+                QComboBox QAbstractItemView {
+                    border: 1px solid #ccc;
+                    background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                    selection-background-color: #3778b7;
+                    selection-color: white;
+                }
+            """)
+            
             # 从配置中获取上次选择的模型
             last_model = None
             try:
@@ -689,7 +746,7 @@ class FloatingWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"初始化模型列表失败: {e}")
             self.result_text.append(f"初始化模型列表失败: {str(e)}")
-            
+
     def _get_directory_size(self, path):
         """获取目录大小（字节）"""
         total_size = 0
@@ -883,133 +940,32 @@ class FloatingWindow(QMainWindow):
             self.download_button.setEnabled(True)
     
     def _download_model(self, model_name):
-        """在后台线程中下载模型"""
+        """下载模型对话框和处理函数"""
         try:
-            self.logger.info(f"开始下载模型: {model_name}")
+            self.logger.info(f"准备下载模型: {model_name}")
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("下载模型")
+            dialog.setText(f"将下载模型 {model_name}，这可能需要一些时间。是否继续？")
+            dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
             
-            # 确保model_name有效
-            if not model_name:
-                raise ValueError("无效的模型名称")
+            # 使用变量引用按钮而不是索引，提高代码的健壮性
+            yes_button = dialog.button(QMessageBox.Yes)
+            no_button = dialog.button(QMessageBox.No)
+            yes_button.setText("是")
+            no_button.setText("否")
             
-            # 构建下载命令
-            import subprocess
+            result = dialog.exec_()
             
-            # 根据模型名称选择正确的仓库
-            model_repo = f"Systran/faster-whisper-{model_name}"
-            if model_name == "distil-large-v3":
-                model_repo = "Systran/faster-distil-whisper-large-v3"
-            elif model_name == "distil-small.en":
-                model_repo = "Systran/faster-distil-whisper-small.en"
-            elif model_name == "distil-medium.en":
-                model_repo = "Systran/faster-distil-whisper-medium.en"
-                
-            cmd = [
-                "huggingface-cli",
-                "download",
-                "--resume-download",
-                model_repo,
-                "--local-dir-use-symlinks",
-                "False"
-            ]
-            
-            self.logger.debug(f"执行命令: {' '.join(cmd)}")
-            
-            # 执行下载命令
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # 在主线程中更新UI
-            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
-            
-            if result.returncode == 0:
-                self.logger.info(f"模型 {model_name} 下载成功")
-                # 使用主线程更新UI
-                QTimer.singleShot(0, lambda: self.download_completed(True, model_name))
+            # 使用按钮对象比较而不是返回值索引
+            if dialog.clickedButton() == yes_button:
+                self.logger.info(f"用户确认下载模型: {model_name}")
+                # 连接到主界面的下载功能
+                self.toggle_recording_signal.emit(self.get_selected_device_id(), self.get_language())
             else:
-                self.logger.error(f"模型下载失败: {result.stderr}")
-                # 使用主线程更新UI
-                QTimer.singleShot(0, lambda: self.download_completed(False, result.stderr))
-                
+                self.logger.info(f"用户取消下载模型: {model_name}")
         except Exception as e:
-            self.logger.error(f"下载模型过程中出错: {e}")
-            # 在主线程中更新UI
-            # 确保QTimer导入正确
-            QTimer.singleShot(0, lambda: self.download_completed(False, str(e)))
+            self.logger.error(f"下载模型对话框出错: {str(e)}")
     
-    @Slot(bool, str)
-    def download_completed(self, success, message):
-        """下载完成后的UI更新（在主线程中调用）"""
-        if success:
-            self.status_label.setText(f"模型下载成功！")
-            model_name = message  # message参数包含模型名称
-            
-            # 将刚下载的模型添加到已下载列表
-            if model_name not in self.available_models:
-                self.available_models.append(model_name)
-            
-            # 重新组织下拉框内容
-            current_index = self.model_combo.currentIndex()
-            self.model_combo.blockSignals(True)  # 阻止信号触发避免重复刷新
-            
-            # 保存当前选择的模型
-            current_model = self.model_combo.currentData()
-            
-            # 清空并重新填充下拉框
-            self.model_combo.clear()
-            
-            # 获取所有模型和大小信息
-            found_models = []
-            for name, path in [
-                ("large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")),
-                ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
-                ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
-                ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
-                ("tiny", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-tiny")),
-                ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3")),
-                ("distil-small.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-small.en")),
-                ("distil-medium.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-medium.en"))
-            ]:
-                if os.path.exists(path):
-                    model_size = self._get_directory_size(path)
-                    found_models.append((name, path, model_size))
-            
-            # 先添加所有已下载的模型
-            for model_name, model_path, model_size in found_models:
-                self.model_combo.addItem(f"{model_name} (已下载，{self._format_size(model_size)})", model_name)
-            
-            # 添加分隔线
-            self.model_combo.addItem("---可下载模型---", None)
-            
-            # 添加未下载的模型
-            available_models = [item[0] for item in found_models]
-            for model in ["large-v3", "medium", "small", "base", "tiny", "distil-large-v3", "distil-small.en", "distil-medium.en"]:
-                if model not in available_models:
-                    self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
-            
-            # 添加删除模型选项
-            self.model_combo.addItem("---删除模型---", None)
-            for model_name, model_path, model_size in found_models:
-                self.model_combo.addItem(f"删除 {model_name} ({self._format_size(model_size)})", f"del_{model_name}")
-            
-            # 尝试选择当前模型或新下载的模型
-            select_model = current_model if current_model != model_name else model_name
-            for i in range(self.model_combo.count()):
-                if self.model_combo.itemData(i) == select_model:
-                    self.model_combo.setCurrentIndex(i)
-                    break
-            
-            self.model_combo.blockSignals(False)  # 恢复信号
-            
-            # 更新UI状态
-            self.toggle_button.setEnabled(True)
-            self.model_combo.setEnabled(True)
-            self.download_button.setEnabled(True)
-        else:
-            # 下载失败
-            self.status_label.setText(f"模型下载失败: {message}")
-            self.toggle_button.setEnabled(True)
-            self.model_combo.setEnabled(True)
-            self.download_button.setEnabled(True)
-
     def update_idle_visualization(self):
         """在非录音状态下更新波形显示"""
         if not self.is_recording and hasattr(self, 'visualizer'):
@@ -1027,6 +983,52 @@ class FloatingWindow(QMainWindow):
         """显示关于对话框"""
         dialog = AboutDialog(self)
         dialog.exec()
+
+    def get_language(self):
+        """获取当前选择的语言代码"""
+        index = self.language_combo.currentIndex()
+        if index >= 0:
+            return self.language_combo.itemData(index)
+        return "auto"  # 默认返回自动检测
+
+    def set_input_devices(self, devices):
+        """设置输入设备列表"""
+        self.logger.debug(f"设置输入设备列表: {devices}")
+        
+        # 清空下拉框
+        self.device_combo.clear()
+        
+        # 将设备添加到下拉框
+        for device_id, device_name in devices:
+            self.device_combo.addItem(device_name, device_id)
+            
+        # 如果有输入设备，自动选择第一个
+        if len(devices) > 0:
+            self.device_combo.setCurrentIndex(0)
+            self.logger.info(f"已选择设备: {self.device_combo.currentText()} (ID: {self.device_combo.currentData()})")
+            self.device_initialized = True
+            self.toggle_button.setEnabled(True)
+            self.status_label.setText("就绪，点击开始录音")
+
+    def refresh_model_list(self):
+        """刷新模型列表"""
+        self.logger.debug("刷新模型列表")
+        # 保存当前选择的模型
+        current_model = None
+        try:
+            current_model = self.model_combo.currentData()
+        except:
+            pass
+            
+        # 重新初始化模型列表
+        self.init_model_list()
+        
+        # 尝试恢复之前选择的模型
+        if current_model:
+            for i in range(self.model_combo.count()):
+                if self.model_combo.itemData(i) == current_model:
+                    self.model_combo.setCurrentIndex(i)
+                    break
 
     class LogHandler(logging.Handler):
         def __init__(self, window):

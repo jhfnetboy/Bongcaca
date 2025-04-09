@@ -280,8 +280,16 @@ class WhisperEngine:
             print(f"下载模型失败: {str(e)}")
             return None
     
-    def transcribe(self, audio_file: str) -> str:
-        """使用批量模式转写音频文件，返回完整文本"""
+    def transcribe(self, audio_file: str, language: str = "zh") -> str:
+        """使用批量模式转写音频文件，返回完整文本
+        
+        参数:
+            audio_file: 音频文件路径
+            language: 语言代码，如"zh"表示中文，"en"表示英文，"auto"表示自动检测
+            
+        返回:
+            转录文本
+        """
         if not os.path.exists(audio_file):
             self.logger.error(f"音频文件不存在: {audio_file}")
             return "错误：音频文件不存在"
@@ -289,16 +297,22 @@ class WhisperEngine:
         try:
             self.ensure_model_loaded()
             
-            self.logger.info(f"Transcribing audio file: {audio_file}")
+            self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}")
             
-            # 转写音频时捕获并安全释放资源
+            # 使用单次调用转写并收集结果，避免使用迭代器
+            beam_size = self.settings.get("beam_size", 5)
+            
+            # 创建一个本地安全的副本，避免后续引用被其他线程修改
+            local_transcript = ""
+            
             try:
-                # 转写音频
-                beam_size = self.settings.get("beam_size", 5)
+                # 如果language是auto，让模型自动检测语言
+                lang_param = None if language == "auto" else language
+                
                 segments, info = self.model.transcribe(
                     audio_file,
                     beam_size=beam_size,
-                    language="zh",
+                    language=lang_param,
                     vad_filter=True,
                     vad_parameters=dict(min_silence_duration_ms=500)
                 )
@@ -306,29 +320,30 @@ class WhisperEngine:
                 # 记录语言检测结果
                 self.logger.info(f"Detected language: {info.language} (probability: {info.language_probability})")
                 
-                # 立即收集所有片段文本并释放segments引用，防止内存访问错误
-                transcript = ""
+                # 立即收集所有片段文本
+                # 使用列表累积文本并连接，避免在循环中拼接字符串可能带来的问题
+                text_segments = []
                 for segment in segments:
-                    transcript += segment.text + " "
+                    text_segments.append(segment.text)
                     
-                # 显式删除segments和info，避免后续访问可能导致的内存错误
-                del segments
-                del info
+                local_transcript = " ".join(text_segments)
+                local_transcript = local_transcript.strip()
+            finally:
+                # 确保释放资源，防止后续访问可能导致的内存错误
+                # 显式删除局部变量
+                if 'segments' in locals():
+                    del segments
+                if 'info' in locals():
+                    del info
+                if 'text_segments' in locals():
+                    del text_segments
+            
+            # 校验结果是否为空或者广告内容
+            if not local_transcript or "感谢使用" in local_transcript:
+                self.logger.warning("转写结果为空或全是广告内容")
+                return "请说话..."
                 
-                # 清理文本
-                transcript = transcript.strip()
-                
-                # 校验结果是否为空或者广告内容
-                if not transcript or "感谢使用" in transcript:
-                    self.logger.warning("转写结果为空或全是广告内容")
-                    return "请说话..."
-                    
-                return transcript
-            except Exception as e:
-                self.logger.error(f"转写音频过程中出错: {str(e)}")
-                # 捕获内部错误但继续抛出
-                raise
-                
+            return local_transcript
         except Exception as e:
             self.logger.error(f"转写过程中出错: {str(e)}")
             return f"错误：{str(e)}"
@@ -343,79 +358,103 @@ class WhisperEngine:
         self.buffer = []
         self.buffer_size = 0
         
-    def get_realtime_transcription(self) -> Optional[str]:
-        """实时转写当前缓冲区中的音频数据"""
-        if not self.buffer or self.buffer_size == 0:
-            return None
+    def get_realtime_transcription(self, audio_file: str = None, language: str = "zh") -> str:
+        """实时处理累积的音频数据，返回转录文本
+        
+        参数:
+            audio_file: 如果提供，则直接使用该文件进行转写，否则使用内部音频缓冲区
+            language: 语言代码，如"zh"表示中文，"en"表示英文，"auto"表示自动检测
             
+        返回:
+            转录文本
+        """
         try:
-            self.ensure_model_loaded()
-
-            # 如果缓冲区太小，可能无法有效识别
-            if self.buffer_size < 8000:  # 至少需要0.5秒的音频(16000Hz采样率，16位)
-                return None
-                
-            # 将缓冲区数据保存为临时文件
-            temp_file_path = None
-            try:
-                # 使用更安全的方式处理临时文件
-                temp_dir = tempfile.gettempdir()
-                temp_file_path = os.path.join(temp_dir, f"whisper_temp_{int(time.time()*1000)}.wav")
-                
-                # 写入WAV头
-                import wave
-                wf = wave.open(temp_file_path, 'wb')
-                wf.setnchannels(1)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(16000)
-                
-                # 创建并写入缓冲区数据的副本，避免原始数据被修改
-                buffer_copy = self.buffer.copy()
-                all_audio_data = b''.join(buffer_copy)
-                wf.writeframes(all_audio_data)
-                wf.close()
-                
-                # 转写临时文件
-                beam_size = self.settings.get("beam_size", 5)
-                segments, info = self.model.transcribe(
-                    temp_file_path,
-                    beam_size=3,  # 使用较小的beam size以提高速度
-                    language="zh",
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
-                    word_timestamps=False,  # 不需要单词级时间戳
-                    condition_on_previous_text=True,  # 利用上下文改善实时体验
-                    no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
+            # 检查是否有足够的数据来处理
+            if not self.buffer or (len(self.buffer) < 8000 and not audio_file):  # 至少需要0.5秒的数据(16000采样率)
+                return ""
+    
+            # 如果没有提供临时音频文件，就使用累积的缓冲区
+            should_delete_file = False
+            if not audio_file:
+                # 创建临时音频文件
+                temp_audio_file = os.path.join(
+                    self.temp_dir, f"temp_audio_{time.time()}.wav"
                 )
-                
-                # 立即提取文本并释放segments引用
-                transcript = ""
-                for segment in segments:
-                    transcript += segment.text + " "
-                
-                # 显式释放资源
-                del segments
-                del info
-                del buffer_copy
-                
-                transcript = transcript.strip()
-                
-                # 结果处理
-                if not transcript:
-                    return None
-                    
-                return transcript
-            except Exception as e:
-                self.logger.error(f"实时转写音频文件处理过程中出错: {str(e)}")
-                return None
-            finally:
-                # 确保临时文件被删除
-                if temp_file_path and os.path.exists(temp_file_path):
-                    try:
-                        os.unlink(temp_file_path)
-                    except Exception as cleanup_err:
-                        self.logger.warning(f"无法删除临时文件: {cleanup_err}")
-                
+                self.buffer_to_wav(temp_audio_file)
+                audio_file = temp_audio_file
+                should_delete_file = True
+    
+            # 转录临时音频文件
+            result = self.transcribe(audio_file, language=language)
+            
+            # 如果我们创建的是临时文件，现在可以安全删除它
+            if should_delete_file:
+                try:
+                    os.remove(audio_file)
+                except:
+                    self.logger.warning(f"无法删除临时音频文件: {audio_file}")
+    
+            return result
         except Exception as e:
-            self.logger.error(f"实时转写过程中出错: {str(e)}")
-            return None 
+            self.logger.error(f"实时转录时发生错误: {str(e)}")
+            return ""
+
+class TranscriptionEngine:
+    """转录引擎 - 支持不同语言选项的音频转录"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.whisper_engine = WhisperEngine(Config())
+        
+    def transcribe(self, audio_file: str, language: str = "auto") -> str:
+        """
+        使用指定的语言转写音频文件
+        
+        参数:
+            audio_file: 音频文件路径
+            language: 语言代码，"auto"表示自动检测，"zh"表示中文，"en"表示英文，"th"表示泰文
+            
+        返回:
+            转录文本
+        """
+        self.logger.info(f"使用TranscriptionEngine转写，语言设置为: {language}")
+        
+        if not os.path.exists(audio_file):
+            self.logger.error(f"音频文件不存在: {audio_file}")
+            return "错误：音频文件不存在"
+        
+        try:
+            # 根据语言设置调整转写参数
+            lang_code = None
+            if language == "zh" or language == "中文":
+                lang_code = "zh"
+            elif language == "en" or language == "英文":
+                lang_code = "en"
+            elif language == "th" or language == "泰文":
+                lang_code = "th"
+            # auto模式下不设置语言，让引擎自动检测
+            
+            # 调用底层引擎完成转写
+            transcript = self.whisper_engine.transcribe(audio_file, lang_code)
+            return transcript
+        except Exception as e:
+            self.logger.error(f"转写过程出错: {str(e)}")
+            return f"错误：{str(e)}"
+            
+    def download_model(self, model_name: str) -> bool:
+        """
+        下载指定的模型
+        
+        参数:
+            model_name: 模型名称
+            
+        返回:
+            下载成功与否
+        """
+        try:
+            self.logger.info(f"开始下载模型: {model_name}")
+            # 委托给底层引擎完成下载
+            return self.whisper_engine.download_model(model_name)
+        except Exception as e:
+            self.logger.error(f"下载模型失败: {str(e)}")
+            return False 
