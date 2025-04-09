@@ -375,14 +375,15 @@ class FloatingWindow(QMainWindow):
         # 添加支持的语言选项
         languages = [
             ("auto", "Auto Detect (不翻译)"),
-            ("en", "English (英文)"),
             ("zh", "中文"),
+            ("en", "English (英文)"),
+            ("th", "ภาษาไทย (泰文)"),
+            ("ur", "اردو (乌尔都语)"),
             ("ja", "日本語 (日文)"),
             ("ko", "한국어 (韩文)"),
             ("de", "Deutsch (德文)"),
             ("fr", "Français (法文)"),
-            ("es", "Español (西班牙文)"),
-            ("th", "ภาษาไทย (泰文)")
+            ("es", "Español (西班牙文)")
         ]
         
         for code, name in languages:
