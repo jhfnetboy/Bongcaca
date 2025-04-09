@@ -1,3 +1,20 @@
+# VoiceTyper/蹦擦擦
+自娱自乐的一个小工具，可能对大家有点用，持续改进中。
+因为打字太累，想解放双手。
+## Features
+1. 目前是Mac版本先发布，Windows后面再说
+2. 语音输入后转化为文字，自动进入剪贴板
+3. 现在支持多语言了，中文语音直接转换为英语，韩语，泰语啥的
+4. 对于8GB RAM电脑：建议medium 模型；16GB可以使用 large-v3 模型，对于4GB RAM电脑：建议使用 small 模型
+
+![](https://raw.githubusercontent.com/jhfnetboy/MarkDownImg/main/img/202504091418521.png)
+![](https://raw.githubusercontent.com/jhfnetboy/MarkDownImg/main/img/202504091418523.png)
+![](https://raw.githubusercontent.com/jhfnetboy/MarkDownImg/main/img/202504091418524.png)
+![](https://raw.githubusercontent.com/jhfnetboy/MarkDownImg/main/img/202504091418526.png)
+
+
+
+
 # 基于 Faster-Whisper 的跨平台语音输入法应用开发方案
 请参考https://github.com/SYSTRAN/faster-whisper， 我想开发一个本地运行的语音输入法应用，基于faster whisper，请给出mac和windows下都可以复用的产品开发方案，不要AI，只要精准的语音转文字输入，支持中文和英文即可，可以在任何输入框呼叫输入法，请先分析和调研，给出产品设计方案和技术架构，然后给出一步步的开发步骤，先不需要给出具体代码了，但要给出主要应用文件和函数设计，要求步骤最终步骤可以发布mac和windows应用
 ## 需求分析与调研
