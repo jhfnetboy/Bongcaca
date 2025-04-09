@@ -213,6 +213,7 @@ class AudioRecorder:
                     frames_copy = list(self.frames)  # 创建帧数据的副本
                     self.frames = []  # 清空原始帧列表
                     self._save_recording_from_frames(frames_copy, current_file)
+                    frames_copy = None  # 显式释放副本
                     return current_file
                 else:
                     self.logger.warning("No frames recorded")
@@ -220,7 +221,13 @@ class AudioRecorder:
         except Exception as e:
             self.logger.error(f"Error in stop method: {e}")
             return None
-            
+        finally:
+            # 确保清理所有资源
+            self.current_filename = None
+            self.current_audio_level = 0
+            self.realtime_callback = None
+            self.realtime_mode = False
+    
     def _save_recording_from_frames(self, frames, filename):
         """从帧列表保存录音到指定文件"""
         try:
