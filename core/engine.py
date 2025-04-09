@@ -302,24 +302,42 @@ class WhisperEngine:
             try:
                 # 转写音频
                 beam_size = self.settings.get("beam_size", 5)
-                # faster-whisper支持的是task='translate'并指定language参数
-                task = "translate" if target_language else "transcribe"
-                segments, info = self.model.transcribe(
-                    audio_file,
-                    beam_size=beam_size,
-                    language=None if language == "auto" else language,  # 如果是auto则设为None让模型自动检测
-                    initial_prompt=initial_prompt,
-                    task=task,  # 如果有target_language则是翻译任务
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
+                
+                # 根据是否需要翻译设置任务类型和参数
+                if target_language and target_language != language:
+                    # 翻译任务
+                    task = "translate"
+                    # 确保faster-whisper使用正确的语言参数
+                    segments, info = self.model.transcribe(
+                        audio_file,
+                        beam_size=beam_size,
+                        language=None if language == "auto" else language,  # 源语言
+                        initial_prompt=initial_prompt,
+                        task=task,  # 翻译任务
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500),
+                        # 明确指定翻译目标语言
+                        translate_to=target_language
+                    )
+                else:
+                    # 普通转写任务
+                    task = "transcribe"
+                    segments, info = self.model.transcribe(
+                        audio_file,
+                        beam_size=beam_size,
+                        language=None if language == "auto" else language,
+                        initial_prompt=initial_prompt,
+                        task=task,
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500)
+                    )
                 
                 # 记录语言检测结果和翻译信息
                 detected_language = info.language if hasattr(info, "language") else "unknown"
                 language_probability = info.language_probability if hasattr(info, "language_probability") else 0.0
                 
                 self.logger.info(f"Detected language: {detected_language} (probability: {language_probability})")
-                if target_language:
+                if target_language and target_language != language:
                     self.logger.info(f"Translating to: {target_language}")
                 
                 # 立即收集所有片段文本并释放segments引用，防止内存访问错误
@@ -396,19 +414,39 @@ class WhisperEngine:
                 
                 # 转写临时文件
                 beam_size = self.settings.get("beam_size", 5)
-                # 使用task参数处理翻译任务
-                task = "translate" if target_language else "transcribe"
-                segments, info = self.model.transcribe(
-                    temp_file_path,
-                    beam_size=3,  # 使用较小的beam size以提高速度
-                    language=None if language == "auto" else language,  # 如果是auto则设为None让模型自动检测
-                    task=task,  # 如果有target_language则是翻译任务
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
-                    word_timestamps=False,  # 不需要单词级时间戳
-                    condition_on_previous_text=True,  # 利用上下文改善实时体验
-                    no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
-                )
+                
+                # 根据是否需要翻译设置任务类型和参数
+                if target_language and target_language != language:
+                    # 翻译任务
+                    task = "translate"
+                    # 确保faster-whisper使用正确的语言参数
+                    segments, info = self.model.transcribe(
+                        temp_file_path,
+                        beam_size=3,  # 使用较小的beam size以提高速度
+                        language=None if language == "auto" else language,  # 源语言
+                        task=task,  # 翻译任务
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
+                        word_timestamps=False,  # 不需要单词级时间戳
+                        condition_on_previous_text=True,  # 利用上下文改善实时体验
+                        no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
+                        # 明确指定翻译目标语言
+                        translate_to=target_language
+                    )
+                else:
+                    # 普通转写任务
+                    task = "transcribe"
+                    segments, info = self.model.transcribe(
+                        temp_file_path,
+                        beam_size=3,  # 使用较小的beam size以提高速度
+                        language=None if language == "auto" else language,
+                        task=task,
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
+                        word_timestamps=False,  # 不需要单词级时间戳
+                        condition_on_previous_text=True,  # 利用上下文改善实时体验
+                        no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
+                    )
                 
                 # 立即提取文本并释放segments引用
                 transcript = ""
