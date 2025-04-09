@@ -1,13 +1,14 @@
 from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame
-from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject, Slot
-from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont
+from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject, Slot, QSize, QUrl, QThread, QMetaObject, Q_ARG
+from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont, QPixmap, QPainterPath, QFontMetrics, QDesktopServices
 import numpy as np
 import logging
 import time
 import os
 import platform
 import subprocess
-from ui.logo import create_app_icon
+from ui.logo import create_app_icon, create_logo_pixmap
+from version import get_version
 
 class AudioVisualizer(QWidget):
     def __init__(self, parent=None):
@@ -102,6 +103,41 @@ class ToggleButton(QPushButton):
 class DeviceSignals(QObject):
     device_changed = Signal(int)
 
+class AboutDialog(QMessageBox):
+    """关于对话框"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("关于 Voice Typer")
+        
+        # 使用HTML格式，支持链接
+        about_text = f"""
+        <h2>Voice Typer v{get_version()}</h2>
+        <p>一个开源的本地语音输入工具，支持中英文语音识别</p>
+        <p>支持平台: macOS, Windows</p>
+        <p>作者: <a href="https://blog.jlab.tech/about">JLab</a></p>
+        <p>GitHub: <a href="https://github.com/jhfnetboy/Bongcaca">@jhfnetboy/Bongcaca</a></p>
+        <p>使用技术: faster-whisper, PySide6, PyAudio</p>
+        """
+        
+        self.setText(about_text)
+        self.setTextFormat(Qt.RichText)  # 使用富文本格式以支持链接
+        
+        # 添加Logo
+        self.setIconPixmap(create_logo_pixmap(128))
+        
+        # 添加链接点击处理
+        self.setStandardButtons(QMessageBox.Ok)
+        
+    def mousePressEvent(self, event):
+        # 获取文本内容，处理链接点击
+        text = self.text()
+        if "href" in text:
+            import re
+            links = re.findall(r'href="([^"]+)"', text)
+            for link in links:
+                QDesktopServices.openUrl(QUrl(link))
+        super().mousePressEvent(event)
+
 class FloatingWindow(QMainWindow):
     # 定义自定义信号
     toggle_recording_signal = Signal()
@@ -131,6 +167,7 @@ class FloatingWindow(QMainWindow):
         self.is_recording = False
         self.transcription_mode = "batch"  # 默认是批量模式
         self.available_models = []  # 可用模型列表
+        self.last_transcription = ""  # 最近的转写结果
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -138,6 +175,35 @@ class FloatingWindow(QMainWindow):
         
         # 创建布局
         layout = QVBoxLayout(central_widget)
+        
+        # 顶部工具栏
+        toolbar_layout = QHBoxLayout()
+        
+        # 版本标签
+        version_label = QLabel(f"v{get_version()}")
+        version_label.setStyleSheet("color: #888; font-size: 10px;")
+        toolbar_layout.addWidget(version_label)
+        
+        # 添加弹簧
+        toolbar_layout.addStretch()
+        
+        # 关于按钮
+        about_button = QPushButton("关于")
+        about_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                color: #3778b7;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                text-decoration: underline;
+            }
+        """)
+        about_button.setCursor(Qt.PointingHandCursor)
+        about_button.clicked.connect(self.show_about_dialog)
+        toolbar_layout.addWidget(about_button)
+        
+        layout.addLayout(toolbar_layout)
         
         # 创建设备选择标签
         device_label = QLabel("Select Input Device:")
@@ -175,6 +241,19 @@ class FloatingWindow(QMainWindow):
             }
             QComboBox:disabled {
                 background-color: #f0f0f0;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #ccc;
+                background-color: white;
+                selection-background-color: #3778b7;
+                selection-color: white;
+                color: black;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 15px;
+                border-left: 1px solid #ccc;
             }
         """)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
@@ -565,9 +644,9 @@ class FloatingWindow(QMainWindow):
             for model_name, model_path in model_paths:
                 if os.path.exists(model_path):
                     model_size = self._get_directory_size(model_path)
-                    found_models.append((model_name, model_path))
+                    found_models.append((model_name, model_path, model_size))
                     self.available_models.append(model_name)
-                    self.model_combo.addItem(f"{model_name} (已下载)", model_name)
+                    self.model_combo.addItem(f"{model_name} (已下载，{self._format_size(model_size)})", model_name)
                     self.result_text.append(f"✓ 找到模型: {model_name} (大小: {self._format_size(model_size)})")
             
             # 如果没有找到已下载的模型，添加可下载选项
@@ -583,6 +662,11 @@ class FloatingWindow(QMainWindow):
                 for model in available_to_download:
                     if model not in self.available_models:
                         self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
+                
+                # 添加删除模型选项
+                self.model_combo.addItem("---删除模型---", None)
+                for model_name, model_path, model_size in found_models:
+                    self.model_combo.addItem(f"删除 {model_name} ({self._format_size(model_size)})", f"del_{model_name}")
                 
                 # 首先尝试设置上次使用的模型
                 selected_index = 0  # 默认使用第一个
@@ -602,11 +686,10 @@ class FloatingWindow(QMainWindow):
                 
                 self.result_text.append(f"已找到 {len(found_models)} 个已下载模型，使用: {selected_model}")
             
-            self.logger.info(f"模型列表初始化完成，找到 {len(found_models)} 个已下载模型")
         except Exception as e:
             self.logger.error(f"初始化模型列表失败: {e}")
-            self.status_label.setText(f"初始化模型列表失败: {str(e)}")
-    
+            self.result_text.append(f"初始化模型列表失败: {str(e)}")
+            
     def _get_directory_size(self, path):
         """获取目录大小（字节）"""
         total_size = 0
@@ -636,6 +719,64 @@ class FloatingWindow(QMainWindow):
         if index >= 0:
             model_name = self.model_combo.currentData()
             if model_name:
+                if model_name.startswith("del_"):
+                    # 处理删除模型请求
+                    real_model_name = model_name[4:]  # 去掉"del_"前缀
+                    # 显示确认对话框
+                    reply = QMessageBox.question(
+                        self, 
+                        "确认删除模型", 
+                        f"确定要删除模型 {real_model_name} 吗？\n删除后将无法使用该模型，需要重新下载。",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        # 确认删除模型
+                        model_path = ""
+                        for name, path in [
+                            ("large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")),
+                            ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
+                            ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
+                            ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
+                            ("tiny", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-tiny")),
+                            ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3")),
+                            ("distil-small.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-small.en")),
+                            ("distil-medium.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-medium.en"))
+                        ]:
+                            if name == real_model_name:
+                                model_path = path
+                                break
+                        
+                        if model_path and os.path.exists(model_path):
+                            try:
+                                # 删除模型目录
+                                import shutil
+                                shutil.rmtree(model_path)
+                                self.logger.info(f"已删除模型: {real_model_name}")
+                                self.status_label.setText(f"已删除模型: {real_model_name}")
+                                
+                                # 从已下载列表中移除
+                                if real_model_name in self.available_models:
+                                    self.available_models.remove(real_model_name)
+                                
+                                # 重新刷新模型列表
+                                self.init_model_list()
+                            except Exception as e:
+                                self.logger.error(f"删除模型失败: {e}")
+                                QMessageBox.warning(self, "删除失败", f"删除模型 {real_model_name} 失败: {str(e)}")
+                        else:
+                            self.logger.error(f"找不到模型路径: {real_model_name}")
+                            QMessageBox.warning(self, "删除失败", f"找不到模型 {real_model_name} 的路径")
+                    
+                    # 重置下拉框到第一个有效模型
+                    for i in range(self.model_combo.count()):
+                        item_data = self.model_combo.itemData(i)
+                        if item_data and not item_data.startswith("del_") and item_data != None:
+                            self.model_combo.setCurrentIndex(i)
+                            break
+                    
+                    return
+                
                 self.logger.info(f"已选择模型: {model_name}")
                 
                 # 将当前选择的模型保存到配置
@@ -651,7 +792,7 @@ class FloatingWindow(QMainWindow):
             else:
                 # 分隔符或未下载模型
                 self.download_button.setEnabled(True)
-    
+
     def on_download_model(self):
         """下载模型按钮事件"""
         try:
@@ -815,42 +956,59 @@ class FloatingWindow(QMainWindow):
             # 清空并重新填充下拉框
             self.model_combo.clear()
             
+            # 获取所有模型和大小信息
+            found_models = []
+            for name, path in [
+                ("large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3")),
+                ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
+                ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
+                ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
+                ("tiny", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-tiny")),
+                ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3")),
+                ("distil-small.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-small.en")),
+                ("distil-medium.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-medium.en"))
+            ]:
+                if os.path.exists(path):
+                    model_size = self._get_directory_size(path)
+                    found_models.append((name, path, model_size))
+            
             # 先添加所有已下载的模型
-            for model in ["large-v3", "medium", "small", "base", "tiny", "distil-large-v3", "distil-small.en", "distil-medium.en"]:
-                if model in self.available_models:
-                    self.model_combo.addItem(f"{model} (已下载)", model)
+            for model_name, model_path, model_size in found_models:
+                self.model_combo.addItem(f"{model_name} (已下载，{self._format_size(model_size)})", model_name)
             
             # 添加分隔线
             self.model_combo.addItem("---可下载模型---", None)
             
             # 添加未下载的模型
+            available_models = [item[0] for item in found_models]
             for model in ["large-v3", "medium", "small", "base", "tiny", "distil-large-v3", "distil-small.en", "distil-medium.en"]:
-                if model not in self.available_models:
+                if model not in available_models:
                     self.model_combo.addItem(f"{model} (点击下载按钮下载)", model)
             
-            # 尝试恢复之前的选择
-            if current_model:
-                for i in range(self.model_combo.count()):
-                    if self.model_combo.itemData(i) == current_model:
-                        self.model_combo.setCurrentIndex(i)
-                        break
-            else:
-                # 如果之前没有选择，选择第一个模型
-                self.model_combo.setCurrentIndex(0)
-                
+            # 添加删除模型选项
+            self.model_combo.addItem("---删除模型---", None)
+            for model_name, model_path, model_size in found_models:
+                self.model_combo.addItem(f"删除 {model_name} ({self._format_size(model_size)})", f"del_{model_name}")
+            
+            # 尝试选择当前模型或新下载的模型
+            select_model = current_model if current_model != model_name else model_name
+            for i in range(self.model_combo.count()):
+                if self.model_combo.itemData(i) == select_model:
+                    self.model_combo.setCurrentIndex(i)
+                    break
+            
             self.model_combo.blockSignals(False)  # 恢复信号
             
-            # 显示成功消息
-            QMessageBox.information(self, "下载成功", f"模型 {model_name} 下载成功！\n应用将在重启后使用新模型。")
-            
+            # 更新UI状态
+            self.toggle_button.setEnabled(True)
+            self.model_combo.setEnabled(True)
+            self.download_button.setEnabled(True)
         else:
+            # 下载失败
             self.status_label.setText(f"模型下载失败: {message}")
-            QMessageBox.warning(self, "下载失败", f"模型下载失败: {message}")
-        
-        # 重新启用UI
-        self.toggle_button.setEnabled(True)
-        self.model_combo.setEnabled(True)
-        self.download_button.setEnabled(True)
+            self.toggle_button.setEnabled(True)
+            self.model_combo.setEnabled(True)
+            self.download_button.setEnabled(True)
 
     def update_idle_visualization(self):
         """在非录音状态下更新波形显示"""
@@ -864,6 +1022,11 @@ class FloatingWindow(QMainWindow):
             
             level = recorder.get_audio_level()
             self.update_audio_level(level)
+
+    def show_about_dialog(self):
+        """显示关于对话框"""
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     class LogHandler(logging.Handler):
         def __init__(self, window):
