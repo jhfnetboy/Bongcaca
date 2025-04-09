@@ -281,81 +281,91 @@ class WhisperEngine:
             print(f"下载模型失败: {str(e)}")
             return None
     
-    def transcribe(self, audio_file, language=None, realtime_mode=False):
-        """转写音频文件
-        
+    def transcribe(self, audio_file: str, language="zh", initial_prompt=None, target_language=None) -> str:
+        """使用批量模式转写音频文件，返回完整文本
         Args:
             audio_file: 音频文件路径
-            language: 语言代码，如果为None或"auto"则使用中文
-            realtime_mode: 是否使用实时转写模式
-            
-        Returns:
-            str: 转写文本，如果转写失败则返回None
+            language: 音频的语言，默认为zh（中文），设置为auto则自动检测
+            initial_prompt: 初始提示，用于引导转写
+            target_language: 目标语言代码，用于翻译
         """
         if not os.path.exists(audio_file):
-            self.logger.error(f"Audio file not found: {audio_file}")
-            return None
+            self.logger.error(f"音频文件不存在: {audio_file}")
+            return "错误：音频文件不存在"
             
         try:
-            # 记录开始时间
-            start_time = time.time()
+            self.ensure_model_loaded()
             
-            # 加载模型
-            if not self.model:
-                self.ensure_model_loaded()
+            self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}, target_language: {target_language}")
+            
+            # 转写音频时捕获并安全释放资源
+            try:
+                # 转写音频
+                beam_size = self.settings.get("beam_size", 5)
                 
-            # 设置默认语言为中文
-            if language is None or language == "auto":
-                language = "zh"
+                # 根据是否需要翻译设置任务类型和参数
+                if target_language and target_language != language:
+                    # 翻译任务
+                    task = "translate"
+                    # 确保faster-whisper使用正确的语言参数
+                    segments, info = self.model.transcribe(
+                        audio_file,
+                        beam_size=beam_size,
+                        language=None if language == "auto" else language,  # 源语言
+                        initial_prompt=initial_prompt,
+                        task=task,  # 翻译任务
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500),
+                        # 明确指定翻译目标语言
+                        translate_to=target_language
+                    )
+                else:
+                    # 普通转写任务
+                    task = "transcribe"
+                    segments, info = self.model.transcribe(
+                        audio_file,
+                        beam_size=beam_size,
+                        language=None if language == "auto" else language,
+                        initial_prompt=initial_prompt,
+                        task=task,
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500)
+                    )
                 
-            self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}")
-            
-            # 转写音频
-            segments, info = self.model.transcribe(
-                audio_file,
-                language=language,
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500)
-            )
-            
-            # 记录结束时间
-            end_time = time.time()
-            transcribe_time = end_time - start_time
-            
-            # 检查语言检测结果
-            detected_language = info.language
-            language_probability = info.language_probability
-            self.logger.info(f"Detected language: {detected_language} (probability: {language_probability})")
-            
-            # 合并所有片段
-            text_segments = []
-            for segment in segments:
-                if segment and segment.text and segment.text.strip():
-                    text_segments.append(segment.text.strip())
-            
-            # 如果没有有效的文本段落，返回None
-            if not text_segments:
-                self.logger.warning("转写结果为空")
-                return None
-            
-            # 合并文本段落
-            text = " ".join(text_segments)
-            
-            # 记录转写统计信息
-            self.logger.info(f"转写统计信息：")
-            self.logger.info(f"- 转写时间: {transcribe_time:.2f}秒")
-            self.logger.info(f"- 使用模型: {self.model_name}")
-            self.logger.info(f"- 语言: {detected_language}")
-            self.logger.info(f"- 文本长度: {len(text)}")
-            
-            return text
-            
+                # 记录语言检测结果和翻译信息
+                detected_language = info.language if hasattr(info, "language") else "unknown"
+                language_probability = info.language_probability if hasattr(info, "language_probability") else 0.0
+                
+                self.logger.info(f"Detected language: {detected_language} (probability: {language_probability})")
+                if target_language and target_language != language:
+                    self.logger.info(f"Translating to: {target_language}")
+                
+                # 立即收集所有片段文本并释放segments引用，防止内存访问错误
+                transcript = ""
+                for segment in segments:
+                    transcript += segment.text + " "
+                    
+                # 显式删除segments和info，避免后续访问可能导致的内存错误
+                del segments
+                del info
+                
+                # 清理文本
+                transcript = transcript.strip()
+                
+                # 校验结果是否为空或者广告内容
+                if not transcript or "感谢使用" in transcript:
+                    self.logger.warning("转写结果为空或全是广告内容")
+                    return "请说话..."
+                    
+                return transcript
+            except Exception as e:
+                self.logger.error(f"转写音频过程中出错: {str(e)}")
+                # 捕获内部错误但继续抛出
+                raise
+                
         except Exception as e:
-            self.logger.error(f"Error transcribing audio: {str(e)}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            return None
+            self.logger.error(f"转写过程中出错: {str(e)}")
+            return f"错误：{str(e)}"
             
     def add_audio_chunk(self, audio_chunk: bytes) -> None:
         """添加音频数据块到缓冲区，用于实时转写"""

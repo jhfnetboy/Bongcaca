@@ -119,9 +119,9 @@ class AboutDialog(QMessageBox):
         
         # 使用HTML格式，支持链接
         about_text = f"""
-        <h2>Voice Typer/蹦擦擦 v{get_version()}</h2>
-        <p>一个开源的本地离线语音输入工具，支持中英等多语言语音识别和多语言转换/翻译</p>
-        <p>支持平台: macOS, Windows（TODO）</p>
+        <h2>Voice Typer v{get_version()}</h2>
+        <p>一个开源的本地语音输入工具，支持中英文语音识别</p>
+        <p>支持平台: macOS, Windows</p>
         <p>作者: <a href="https://blog.jlab.tech/about">JLab</a></p>
         <p>GitHub: <a href="https://github.com/jhfnetboy/Bongcaca">@jhfnetboy/Bongcaca</a></p>
         <p>使用技术: faster-whisper, PySide6, PyAudio</p>
@@ -395,7 +395,7 @@ class FloatingWindow(QMainWindow):
         
         # 创建录音按钮
         self.toggle_button = ToggleButton()
-        self.toggle_button.clicked.connect(self.toggle_recording)
+        self.toggle_button.clicked.connect(self.on_toggle_recording)
         self.toggle_button.setEnabled(False)  # 初始禁用
         left_layout.addWidget(self.toggle_button, alignment=Qt.AlignCenter)
         
@@ -437,7 +437,7 @@ class FloatingWindow(QMainWindow):
         self.splitter.addWidget(self.right_panel)
         
         # 设置拆分器初始尺寸比例(左:右)
-        self.splitter.setSizes([287, 440])  # 原比例250:400，增加15%和10%
+        self.splitter.setSizes([325, 325])
         
         # 设置拆分器处理样式
         self.splitter.setHandleWidth(1)  # 设置分隔线宽度
@@ -575,16 +575,30 @@ class FloatingWindow(QMainWindow):
         # 调用父类方法处理其他键盘事件
         super().keyPressEvent(event)
             
-    def toggle_recording(self):
-        """切换录音状态 - 只发射信号,不改变状态"""
+    def on_toggle_recording(self):
+        """切换录音状态"""
         if not self.device_initialized:
-            self.logger.warning("设备未初始化,禁止录音")
-            self.status_label.setText("初始化设备中,请稍候...")
+            self.logger.warning("设备未初始化，请先选择输入设备")
             return
             
-        self.logger.debug(f"切换录音状态,当前状态: {self.is_recording}")
-        # 发射信号,让main.py处理实际逻辑
-        self.toggle_recording_signal.emit()
+        if not self.model_initialized:
+            self.logger.warning("模型未初始化，请等待模型加载完成")
+            return
+            
+        if not self.is_recording:
+            # 开始录音
+            self.is_recording = True
+            self.toggle_button.set_recording(True)
+            self.status_label.setText("正在录音...")
+            self.toggle_recording_signal.emit()
+            # 发出开始提示音
+            os.system('afplay /System/Library/Sounds/Ping.aiff')
+        else:
+            # 停止录音
+            self.is_recording = False
+            self.toggle_button.set_recording(False)
+            self.status_label.setText("正在处理...")
+            self.toggle_recording_signal.emit()
         
     def init_device_list(self):
         """初始化设备列表"""
@@ -645,9 +659,13 @@ class FloatingWindow(QMainWindow):
             self.device_changed.emit(device_id)
             
     def update_result(self, text):
-        """更新结果文本"""
+        """更新转写结果"""
         self.result_text.append(text)
-        self.logger.info(f"转写结果: {text}")
+        self.status_label.setText("转写完成")
+        # 发出完成提示音（两声）
+        os.system('afplay /System/Library/Sounds/Ping.aiff')
+        time.sleep(0.2)
+        os.system('afplay /System/Library/Sounds/Ping.aiff')
         
         # 确保文本区域滚动到最新内容
         scrollbar = self.result_text.verticalScrollBar()
