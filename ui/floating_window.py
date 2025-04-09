@@ -437,7 +437,7 @@ class FloatingWindow(QMainWindow):
         self.splitter.addWidget(self.right_panel)
         
         # 设置拆分器初始尺寸比例(左:右)
-        self.splitter.setSizes([325, 325])
+        self.splitter.setSizes([325, 406])
         
         # 设置拆分器处理样式
         self.splitter.setHandleWidth(1)  # 设置分隔线宽度
