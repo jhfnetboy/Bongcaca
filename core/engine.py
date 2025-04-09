@@ -39,7 +39,10 @@ class WhisperEngine:
             ("medium", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-medium")),
             ("small", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small")),
             ("base", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")),
-            ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3"))
+            ("tiny", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-tiny")),
+            ("distil-large-v3", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3")),
+            ("distil-small.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-small.en")),
+            ("distil-medium.en", os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-distil-whisper-medium.en"))
         ]
         
         for model_name, model_path in model_checks:
@@ -68,11 +71,11 @@ class WhisperEngine:
         
         if model_name == "large-v3" or model_name == "distil-large-v3":
             return min(cpu_count, 8)  # 使用最多8个线程
-        elif model_name == "medium":
+        elif model_name == "medium" or model_name == "distil-medium.en":
             return min(cpu_count, 6)  # 使用最多6个线程
-        elif model_name == "small":
+        elif model_name == "small" or model_name == "distil-small.en":
             return min(cpu_count, 4)  # 使用最多4个线程
-        else:  # base or other
+        else:  # base, tiny or other
             return min(cpu_count, 2)  # 使用最多2个线程
         
     def get_optimal_settings(self) -> Dict[str, Any]:

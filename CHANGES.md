@@ -1,5 +1,11 @@
 # 更新日志
 
+## 2024-04-12 (0.23.37)
+- 修复：优化distil-small.en和distil-medium.en模型的检测逻辑，确保下载后能正确被识别
+- 改进：增强了引擎中对不同模型类型的线程优化支持
+- 修复：解决macOS应用打包中权限设置问题，确保应用能够正确请求麦克风和文本输入权限
+- 技术：改进Info.plist处理方式，使用plistlib直接修改二进制plist文件，提高权限设置的可靠性
+
 ## 2024-03-21
 - 改进了模型下载逻辑，使用 huggingface-cli 命令行工具
 - 添加了模型缓存目录检查
@@ -272,3 +278,4 @@ https://huggingface.co/Systran/faster-whisper-base
 https://huggingface.co/Systran/faster-whisper-small
 https://huggingface.co/Systran/faster-whisper-medium
 https://huggingface.co/Systran/faster-distil-whisper-large-v3
+

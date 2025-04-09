@@ -265,71 +265,98 @@ def build_macos():
     app_path = Path("dist/VoiceTyper.app")
     plist_path = app_path / "Contents" / "Info.plist"
     if plist_path.exists():
-        # 备份原始文件
-        shutil.copy(plist_path, str(plist_path) + ".bak")
-        
-        # 复制自定义 plist
-        custom_plist = resources_dir / "Info.plist"
-        if custom_plist.exists():
-            # 添加更多权限声明到plist文件
-            with open(custom_plist, 'r', encoding='utf-8') as f:
-                plist_content = f.read()
-                
-            # 确保包含录音权限
-            if "<key>NSMicrophoneUsageDescription</key>" not in plist_content:
-                logger.warning("添加缺失的麦克风权限声明到Info.plist")
-                # 在</dict>前插入权限
-                plist_content = plist_content.replace('</dict>', '''    <key>NSMicrophoneUsageDescription</key>
-    <string>需要麦克风权限进行语音输入</string>
-</dict>''')
+        try:
+            # 备份原始文件
+            shutil.copy(plist_path, str(plist_path) + ".bak")
+            logger.info(f"成功备份原始Info.plist到 {plist_path}.bak")
             
-            # 确保包含控制其他应用的权限
-            if "<key>NSAppleEventsUsageDescription</key>" not in plist_content:
-                logger.warning("添加缺失的AppleEvents权限声明到Info.plist")
-                # 在</dict>前插入权限
-                plist_content = plist_content.replace('</dict>', '''    <key>NSAppleEventsUsageDescription</key>
-    <string>需要控制其他应用以插入文本</string>
-</dict>''')
+            # 直接修改最终的 Info.plist 文件，确保包含所有必要权限
+            from plistlib import load, dump
             
-            # 写入更新后的plist文件
-            with open(custom_plist, 'w', encoding='utf-8') as f:
-                f.write(plist_content)
+            # 读取当前plist
+            with open(plist_path, 'rb') as f:
+                plist_data = load(f)
             
-            shutil.copy(custom_plist, plist_path)
-            logger.info("已更新应用的 Info.plist 并添加必要的权限声明")
+            # 添加必要的权限说明
+            plist_data['NSMicrophoneUsageDescription'] = '需要麦克风权限进行语音输入'
+            plist_data['NSAppleEventsUsageDescription'] = '需要控制其他应用以插入文本'
             
-            # 输出最终的plist内容以便检查
-            with open(plist_path, 'r', encoding='utf-8') as f:
-                final_plist = f.read()
-                logger.info(f"最终的Info.plist内容:\n{final_plist}")
+            # 写回修改后的plist
+            with open(plist_path, 'wb') as f:
+                dump(plist_data, f)
+            
+            logger.info(f"已更新应用的Info.plist并添加必要的权限声明")
             
             # 设置文件权限
-            try:
-                import stat
-                os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-                logger.info(f"已设置Info.plist权限: 644")
-            except Exception as e:
-                logger.error(f"设置Info.plist权限失败: {e}")
+            import stat
+            os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+            logger.info(f"已设置Info.plist权限: 644")
             
-            # 检查应用结构
-            logger.info("检查打包应用的结构:")
-            app_contents = app_path / "Contents"
-            logger.info(f"应用目录: {app_path}")
-            
-            # 检查主要文件和目录
-            for path in ["MacOS/VoiceTyper", "Info.plist", "Resources"]:
-                full_path = app_contents / path
-                if os.path.exists(full_path):
-                    logger.info(f"✓ 存在: {path}")
+            # 验证最终的Info.plist内容
+            with open(plist_path, 'rb') as f:
+                final_plist = load(f)
+                logger.info(f"最终的Info.plist包含以下权限声明:")
+                if 'NSMicrophoneUsageDescription' in final_plist:
+                    logger.info(f"✓ 麦克风权限: {final_plist['NSMicrophoneUsageDescription']}")
                 else:
-                    logger.error(f"✗ 缺失: {path}")
+                    logger.error(f"✗ 缺少麦克风权限声明")
+                
+                if 'NSAppleEventsUsageDescription' in final_plist:
+                    logger.info(f"✓ AppleEvents权限: {final_plist['NSAppleEventsUsageDescription']}")
+                else:
+                    logger.error(f"✗ 缺少AppleEvents权限声明")
+        
+        except Exception as e:
+            logger.error(f"修改Info.plist时出错: {e}")
+            logger.warning("将尝试使用备份方法更新Info.plist")
             
-            # 检查库和框架
-            frameworks_path = app_contents / "Frameworks"
-            if os.path.exists(frameworks_path):
-                logger.info(f"包含 {len(os.listdir(frameworks_path))} 个框架文件")
+            # 备份方法：直接覆盖Info.plist文件
+            custom_plist = resources_dir / "Info.plist"
+            if custom_plist.exists():
+                # 确保模板文件包含正确的权限声明
+                with open(custom_plist, 'r', encoding='utf-8') as f:
+                    plist_content = f.read()
+                
+                # 检查并添加必要的权限声明
+                if "<key>NSMicrophoneUsageDescription</key>" not in plist_content:
+                    logger.warning("添加缺失的麦克风权限声明到Info.plist模板")
+                    plist_content = plist_content.replace('</dict>', '''    <key>NSMicrophoneUsageDescription</key>
+    <string>需要麦克风权限进行语音输入</string>
+</dict>''')
+                
+                if "<key>NSAppleEventsUsageDescription</key>" not in plist_content:
+                    logger.warning("添加缺失的AppleEvents权限声明到Info.plist模板")
+                    plist_content = plist_content.replace('</dict>', '''    <key>NSAppleEventsUsageDescription</key>
+    <string>需要控制其他应用以插入文本</string>
+</dict>''')
+                
+                # 写入更新后的模板
+                with open(custom_plist, 'w', encoding='utf-8') as f:
+                    f.write(plist_content)
+                
+                # 复制到应用目录
+                shutil.copy(custom_plist, plist_path)
+                logger.info(f"使用自定义模板覆盖Info.plist文件")
+        
+        # 检查应用结构
+        logger.info("检查打包应用的结构:")
+        app_contents = app_path / "Contents"
+        logger.info(f"应用目录: {app_path}")
+        
+        # 检查主要文件和目录
+        for path in ["MacOS/VoiceTyper", "Info.plist", "Resources"]:
+            full_path = app_contents / path
+            if os.path.exists(full_path):
+                logger.info(f"✓ 存在: {path}")
             else:
-                logger.warning("缺少Frameworks目录")
+                logger.error(f"✗ 缺失: {path}")
+        
+        # 检查库和框架
+        frameworks_path = app_contents / "Frameworks"
+        if os.path.exists(frameworks_path):
+            logger.info(f"包含 {len(os.listdir(frameworks_path))} 个框架文件")
+        else:
+            logger.warning("缺少Frameworks目录")
     
     # 创建 DMG
     try:
