@@ -178,6 +178,16 @@ def transcribe_audio(audio_file, model_type="large-v3", language="zh", initial_p
     )
     logger.info(f"转写结果: {result}")
     
+    # 计算录音统计信息
+    file_size = os.path.getsize(audio_file) / (1024 * 1024)  # 转换为MB
+    duration = len(frames) / (RATE * CHANNELS * 2)  # 计算录音时长
+    chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
+    
+    # 输出统计信息
+    logger.info(f"录音统计: 文件大小={file_size:.2f}MB, 录音时长={duration:.2f}秒, "
+              f"转写时间={transcription_time:.2f}秒, 字符数={len(text)}, "
+              f"中文字数={chinese_chars}, 使用模型={model_name}, 语言={language}")
+    
     return result
 
 def run_recording_loop(window, engine, recorder):

@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QComboBox, QMessageBox, QTextEdit, QHBoxLayout, QRadioButton, QButtonGroup, QFrame, QFormLayout, QLineEdit, QSplitter
 from PySide6.QtCore import Qt, QTimer, QPointF, Signal, QObject, Slot, QSize, QUrl, QThread, QMetaObject, Q_ARG
 from PySide6.QtGui import QIcon, QPainter, QColor, QPolygonF, QPalette, QLinearGradient, QBrush, QPen, QFont, QPixmap, QPainterPath, QFontMetrics, QDesktopServices
 import numpy as np
@@ -182,8 +182,19 @@ class FloatingWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # 创建布局
-        layout = QVBoxLayout(central_widget)
+        # 创建主布局 - 改为水平布局
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # 减少边距
+        main_layout.setSpacing(0)  # 减少组件间间距
+        
+        # 创建拆分器
+        self.splitter = QSplitter(Qt.Horizontal)
+        
+        # 创建左侧面板
+        self.left_panel = QWidget()
+        left_layout = QVBoxLayout(self.left_panel)
+        left_layout.setSpacing(10)  # 设置组件间距
+        left_layout.setContentsMargins(10, 10, 10, 10)  # 设置内边距
         
         # 顶部工具栏
         toolbar_layout = QHBoxLayout()
@@ -212,13 +223,13 @@ class FloatingWindow(QMainWindow):
         about_button.clicked.connect(self.show_about_dialog)
         toolbar_layout.addWidget(about_button)
         
-        layout.addLayout(toolbar_layout)
+        left_layout.addLayout(toolbar_layout)
         
         # 创建设备选择标签
         device_label = QLabel("Select Input Device:")
         device_label.setAlignment(Qt.AlignCenter)
         device_label.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(device_label)
+        left_layout.addWidget(device_label)
         
         # 创建设备选择下拉框
         self.device_combo = QComboBox()
@@ -244,13 +255,13 @@ class FloatingWindow(QMainWindow):
             }
         """)
         self.device_combo.currentIndexChanged.connect(self.on_device_changed)
-        layout.addWidget(self.device_combo)
+        left_layout.addWidget(self.device_combo)
         
         # 添加模型选择框
         model_label = QLabel("Select Model:")
         model_label.setAlignment(Qt.AlignCenter)
         model_label.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(model_label)
+        left_layout.addWidget(model_label)
         
         self.model_combo = QComboBox()
         self.model_combo.setStyleSheet("""
@@ -281,7 +292,7 @@ class FloatingWindow(QMainWindow):
             }
         """)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
-        layout.addWidget(self.model_combo)
+        left_layout.addWidget(self.model_combo)
         
         # 添加模型下载按钮
         self.download_button = QPushButton("Download Model")
@@ -303,7 +314,7 @@ class FloatingWindow(QMainWindow):
             }
         """)
         self.download_button.clicked.connect(self.on_download_model)
-        layout.addWidget(self.download_button)
+        left_layout.addWidget(self.download_button)
         
         # 添加模式选择框
         mode_frame = QFrame()
@@ -330,7 +341,7 @@ class FloatingWindow(QMainWindow):
         # 连接模式切换信号
         self.batch_mode_radio.toggled.connect(self.on_mode_changed)
         
-        layout.addWidget(mode_frame)
+        left_layout.addWidget(mode_frame)
         
         # 添加语言翻译选择框
         lang_frame = QFrame()
@@ -364,14 +375,15 @@ class FloatingWindow(QMainWindow):
         # 添加支持的语言选项
         languages = [
             ("auto", "Auto Detect (不翻译)"),
-            ("en", "English (英文)"),
             ("zh", "中文"),
+            ("en", "English (英文)"),
+            ("th", "ภาษาไทย (泰文)"),
+            ("ur", "اردو (乌尔都语)"),
             ("ja", "日本語 (日文)"),
             ("ko", "한국어 (韩文)"),
             ("de", "Deutsch (德文)"),
             ("fr", "Français (法文)"),
-            ("es", "Español (西班牙文)"),
-            ("th", "ภาษาไทย (泰文)")
+            ("es", "Español (西班牙文)")
         ]
         
         for code, name in languages:
@@ -380,17 +392,17 @@ class FloatingWindow(QMainWindow):
         self.lang_combo.currentIndexChanged.connect(self.on_target_language_changed)
         lang_layout.addWidget(self.lang_combo)
         
-        layout.addWidget(lang_frame)
+        left_layout.addWidget(lang_frame)
         
         # 创建录音按钮
         self.toggle_button = ToggleButton()
-        self.toggle_button.clicked.connect(self.toggle_recording)
+        self.toggle_button.clicked.connect(self.on_toggle_recording)
         self.toggle_button.setEnabled(False)  # 初始禁用
-        layout.addWidget(self.toggle_button, alignment=Qt.AlignCenter)
+        left_layout.addWidget(self.toggle_button, alignment=Qt.AlignCenter)
         
         # 创建音频可视化器
         self.visualizer = AudioVisualizer()
-        layout.addWidget(self.visualizer)
+        left_layout.addWidget(self.visualizer)
         
         # 创建状态标签
         self.status_label = QLabel("初始化设备中...")
@@ -401,7 +413,12 @@ class FloatingWindow(QMainWindow):
                 font-size: 13px;
             }
         """)
-        layout.addWidget(self.status_label)
+        left_layout.addWidget(self.status_label)
+        
+        # 创建右侧面板，放置文本显示区域
+        self.right_panel = QWidget()
+        right_layout = QVBoxLayout(self.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         
         # 创建文本显示区域
         self.result_text = QTextEdit()
@@ -412,16 +429,52 @@ class FloatingWindow(QMainWindow):
                 background-color: #f5f5f5;
                 border: 1px solid #ddd;
                 border-radius: 4px;
-                min-height: 100px;
             }
         """)
-        layout.addWidget(self.result_text)
+        right_layout.addWidget(self.result_text)
+        
+        # 将左右面板添加到拆分器
+        self.splitter.addWidget(self.left_panel)
+        self.splitter.addWidget(self.right_panel)
+        
+        # 设置拆分器初始尺寸比例(左:右)
+        self.splitter.setSizes([325, 406])
+        
+        # 设置拆分器处理样式
+        self.splitter.setHandleWidth(1)  # 设置分隔线宽度
+        self.splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #ccc;
+            }
+            QSplitter::handle:hover {
+                background-color: #999;
+            }
+        """)
+        
+        # 创建折叠按钮
+        self.toggle_panel_btn = QPushButton("◀")
+        self.toggle_panel_btn.setFixedSize(20, 60)
+        self.toggle_panel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        self.toggle_panel_btn.clicked.connect(self.toggle_right_panel)
+        
+        # 添加组件到主布局
+        main_layout.addWidget(self.splitter)
+        main_layout.addWidget(self.toggle_panel_btn)
         
         # 设置日志处理器
         self.logger.addHandler(self.LogHandler(self))
         
         # 设置窗口大小
-        self.setFixedSize(400, 650)
+        self.setFixedSize(650, 650)
         
         # 初始化设备列表
         self.init_device_list()
@@ -434,11 +487,39 @@ class FloatingWindow(QMainWindow):
         self.idle_timer.timeout.connect(self.update_idle_visualization)
         self.idle_timer.start(100)  # 100毫秒更新一次
         
+    def toggle_right_panel(self):
+        """折叠/展开右侧面板"""
+        if self.right_panel.isVisible():
+            self.right_panel.hide()
+            self.toggle_panel_btn.setText("▶")
+            # 保存拆分器状态
+            self.splitter_state = self.splitter.saveState()
+            # 调整窗口大小
+            self.setFixedSize(400, 650)
+            # 调整左侧面板边距，给更多空间
+            self.left_panel.layout().setContentsMargins(15, 15, 15, 15)
+        else:
+            self.right_panel.show()
+            self.toggle_panel_btn.setText("◀")
+            # 恢复左侧面板原有边距
+            self.left_panel.layout().setContentsMargins(10, 10, 10, 10)
+            # 如果有保存的状态则恢复
+            if hasattr(self, 'splitter_state'):
+                self.splitter.restoreState(self.splitter_state)
+            # 恢复窗口大小
+            self.setFixedSize(650, 650)
+        
     def keyPressEvent(self, event):
         """处理键盘事件"""
         # 处理空格键触发录音
         if event.key() == Qt.Key_Space:
             self.toggle_button.click()
+            event.accept()
+            return
+            
+        # 添加Ctrl+T快捷键切换右侧面板
+        if event.key() == Qt.Key_T and event.modifiers() == Qt.ControlModifier:
+            self.toggle_panel_btn.click()
             event.accept()
             return
             
@@ -495,16 +576,30 @@ class FloatingWindow(QMainWindow):
         # 调用父类方法处理其他键盘事件
         super().keyPressEvent(event)
             
-    def toggle_recording(self):
-        """切换录音状态 - 只发射信号,不改变状态"""
+    def on_toggle_recording(self):
+        """切换录音状态"""
         if not self.device_initialized:
-            self.logger.warning("设备未初始化,禁止录音")
-            self.status_label.setText("初始化设备中,请稍候...")
+            self.logger.warning("设备未初始化，请先选择输入设备")
             return
             
-        self.logger.debug(f"切换录音状态,当前状态: {self.is_recording}")
-        # 发射信号,让main.py处理实际逻辑
-        self.toggle_recording_signal.emit()
+        if not self.model_initialized:
+            self.logger.warning("模型未初始化，请等待模型加载完成")
+            return
+            
+        if not self.is_recording:
+            # 开始录音
+            self.is_recording = True
+            self.toggle_button.set_recording(True)
+            self.status_label.setText("正在录音...")
+            self.toggle_recording_signal.emit()
+            # 发出开始提示音
+            os.system('afplay /System/Library/Sounds/Ping.aiff')
+        else:
+            # 停止录音
+            self.is_recording = False
+            self.toggle_button.set_recording(False)
+            self.status_label.setText("正在处理...")
+            self.toggle_recording_signal.emit()
         
     def init_device_list(self):
         """初始化设备列表"""
@@ -565,9 +660,17 @@ class FloatingWindow(QMainWindow):
             self.device_changed.emit(device_id)
             
     def update_result(self, text):
-        """更新结果文本"""
+        """更新转写结果"""
         self.result_text.append(text)
-        self.logger.info(f"转写结果: {text}")
+        self.status_label.setText("转写完成")
+        # 发出完成提示音（两声）
+        os.system('afplay /System/Library/Sounds/Ping.aiff')
+        time.sleep(0.2)
+        os.system('afplay /System/Library/Sounds/Ping.aiff')
+        
+        # 确保文本区域滚动到最新内容
+        scrollbar = self.result_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
         
         # 保存最新的转写结果到应用剪贴板
         self.last_transcription = text

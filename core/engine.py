@@ -362,6 +362,15 @@ class WhisperEngine:
                 self.logger.error(f"转写音频过程中出错: {str(e)}")
                 # 捕获内部错误但继续抛出
                 raise
+            finally:
+                # 确保清理所有资源
+                if hasattr(self, 'model') and self.model is not None:
+                    try:
+                        # 显式释放模型资源
+                        del self.model
+                        self.model = None
+                    except Exception as e:
+                        self.logger.error(f"释放模型资源时出错: {str(e)}")
                 
         except Exception as e:
             self.logger.error(f"转写过程中出错: {str(e)}")
