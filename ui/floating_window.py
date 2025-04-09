@@ -147,7 +147,7 @@ class AboutDialog(QMessageBox):
 
 class FloatingWindow(QMainWindow):
     # 定义自定义信号
-    toggle_recording_signal = Signal(int, str)  # 设备ID, 语言
+    toggle_recording_signal = Signal()
     transcription_mode_changed = Signal(str)  # 新增模式切换信号
     model_changed = Signal(str)  # 新增模型切换信号
     
@@ -231,7 +231,7 @@ class FloatingWindow(QMainWindow):
             }
             QComboBox QAbstractItemView {
                 border: 1px solid #ccc;
-                background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                background-color: rgba(255, 255, 255, 153);  /* 60%透明度的白色 */
                 selection-background-color: #3778b7;
                 selection-color: white;
             }
@@ -240,15 +240,14 @@ class FloatingWindow(QMainWindow):
         layout.addWidget(self.device_combo)
         
         # 添加语言选择框
-        language_label = QLabel("Translate Your Voice To:")
+        language_label = QLabel("Select Language:")
         language_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(language_label)
         
         self.language_combo = QComboBox()
-        self.language_combo.addItem("自动（识别语言）", "auto")
+        self.language_combo.addItem("自动", "auto")
         self.language_combo.addItem("中文", "zh")
         self.language_combo.addItem("英文", "en")
-        self.language_combo.addItem("泰文", "th")
         self.language_combo.setCurrentIndex(0)  # 默认选择自动检测
         layout.addWidget(self.language_combo)
         
@@ -270,7 +269,7 @@ class FloatingWindow(QMainWindow):
             }
             QComboBox QAbstractItemView {
                 border: 1px solid #ccc;
-                background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                background-color: rgba(255, 255, 255, 153);  /* 60%透明度的白色 */
                 selection-background-color: #3778b7;
                 selection-color: white;
             }
@@ -449,7 +448,7 @@ class FloatingWindow(QMainWindow):
             
         self.logger.debug(f"切换录音状态,当前状态: {self.is_recording}")
         # 发射信号,让main.py处理实际逻辑
-        self.toggle_recording_signal.emit(self.get_selected_device_id(), self.get_language())
+        self.toggle_recording_signal.emit()
         
     def init_device_list(self):
         """初始化设备列表"""
@@ -477,7 +476,7 @@ class FloatingWindow(QMainWindow):
                 }
                 QComboBox QAbstractItemView {
                     border: 1px solid #ccc;
-                    background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                    background-color: rgba(255, 255, 255, 153);  /* 60%透明度的白色 */
                     selection-background-color: #3778b7;
                     selection-color: white;
                 }
@@ -656,7 +655,7 @@ class FloatingWindow(QMainWindow):
                 }
                 QComboBox QAbstractItemView {
                     border: 1px solid #ccc;
-                    background-color: rgba(255, 255, 255, 178);  /* 30%透明度的白色 */
+                    background-color: rgba(255, 255, 255, 153);  /* 60%透明度的白色 */
                     selection-background-color: #3778b7;
                     selection-color: white;
                 }
@@ -740,6 +739,9 @@ class FloatingWindow(QMainWindow):
                 # 设置选中的模型
                 self.model_combo.setCurrentIndex(selected_index)
                 selected_model = self.model_combo.currentData()
+                
+                # 更新语言选项
+                self.update_language_options(selected_model)
                 
                 self.result_text.append(f"已找到 {len(found_models)} 个已下载模型，使用: {selected_model}")
             
@@ -844,11 +846,55 @@ class FloatingWindow(QMainWindow):
                 except Exception as e:
                     self.logger.error(f"保存模型选择失败: {e}")
                 
+                # 根据模型更新语言选项
+                self.update_language_options(model_name)
+                
                 # 发出模型改变信号
                 self.model_changed.emit(model_name)
             else:
                 # 分隔符或未下载模型
                 self.download_button.setEnabled(True)
+
+    def update_language_options(self, model_name):
+        """根据模型更新语言选项"""
+        self.logger.debug(f"更新语言选项，当前模型: {model_name}")
+        
+        # 保存当前选择
+        current_lang = self.language_combo.currentData()
+        
+        # 清空语言选择
+        self.language_combo.clear()
+        
+        # 添加自动检测选项
+        self.language_combo.addItem("自动检测", "auto")
+        
+        # 根据模型添加特定语言选项
+        if "en" in model_name:
+            # 英文专用模型
+            self.language_combo.addItem("英文", "en")
+        else:
+            # 通用多语言模型
+            self.language_combo.addItem("中文", "zh")
+            self.language_combo.addItem("英文", "en")
+            # 添加其他主要语言
+            self.language_combo.addItem("日语", "ja")
+            self.language_combo.addItem("韩语", "ko")
+            self.language_combo.addItem("法语", "fr")
+            self.language_combo.addItem("德语", "de")
+            self.language_combo.addItem("西班牙语", "es")
+            self.language_combo.addItem("俄语", "ru")
+            
+        # 尝试恢复之前的选择
+        if current_lang:
+            for i in range(self.language_combo.count()):
+                if self.language_combo.itemData(i) == current_lang:
+                    self.language_combo.setCurrentIndex(i)
+                    break
+        else:
+            # 默认选择自动检测
+            self.language_combo.setCurrentIndex(0)
+            
+        self.logger.info(f"已更新语言选项，当前选择: {self.language_combo.currentText()}")
 
     def on_download_model(self):
         """下载模型按钮事件"""
@@ -960,7 +1006,7 @@ class FloatingWindow(QMainWindow):
             if dialog.clickedButton() == yes_button:
                 self.logger.info(f"用户确认下载模型: {model_name}")
                 # 连接到主界面的下载功能
-                self.toggle_recording_signal.emit(self.get_selected_device_id(), self.get_language())
+                self.toggle_recording_signal.emit()
             else:
                 self.logger.info(f"用户取消下载模型: {model_name}")
         except Exception as e:

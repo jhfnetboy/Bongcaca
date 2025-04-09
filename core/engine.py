@@ -412,7 +412,7 @@ class TranscriptionEngine:
         
         参数:
             audio_file: 音频文件路径
-            language: 语言代码，"auto"表示自动检测，"zh"表示中文，"en"表示英文，"th"表示泰文
+            language: 语言代码，"auto"表示自动检测，"zh"表示中文，"en"表示英文
             
         返回:
             转录文本
@@ -430,8 +430,6 @@ class TranscriptionEngine:
                 lang_code = "zh"
             elif language == "en" or language == "英文":
                 lang_code = "en"
-            elif language == "th" or language == "泰文":
-                lang_code = "th"
             # auto模式下不设置语言，让引擎自动检测
             
             # 调用底层引擎完成转写

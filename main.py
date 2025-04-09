@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon, QMenu,
 from PySide6.QtCore import Qt, QObject, Signal, Slot, QThread, QTimer
 from PySide6.QtGui import QIcon, QAction
 
+from ui.logo import create_app_icon, create_logo_pixmap
 from core.engine import WhisperEngine, TranscriptionEngine
 from core.recorder import AudioRecorder
 from ui.floating_window import FloatingWindow, WindowSignals
@@ -161,9 +162,9 @@ def play_notification_sound():
     except Exception as e:
         logger.error(f"播放通知声音过程中出错: {e}")
 
-def run_recording_loop(window, engine, recorder, language="auto", max_duration=300):
+def run_recording_loop(window, engine, recorder, max_duration=300):
     """录音循环，处理音频录制和转写"""
-    logger.debug(f"开始录音循环，语言设置为: {language}")
+    logger.debug("开始录音循环")
     
     try:
         # 根据选择的模式启动录音
@@ -186,6 +187,7 @@ def run_recording_loop(window, engine, recorder, language="auto", max_duration=3
                 # 确保至少每1秒尝试一次转写，避免过于频繁
                 if current_time - last_update_time >= 1.0:
                     # 获取当前选择的语言
+                    language = window.get_language()
                     result = engine.get_realtime_transcription(language=language)
                     if result and result != last_transcription:
                         window.update_result(result)
@@ -259,8 +261,8 @@ def run_recording_loop(window, engine, recorder, language="auto", max_duration=3
             
             # 转写音频
             try:
-                logger.debug(f"开始转写音频文件: {audio_file}，语言设置为: {language}")
-                result = engine.transcribe(audio_file, language)
+                logger.debug(f"开始转写音频文件: {audio_file}")
+                result = engine.transcribe(audio_file)
                 
                 # 计算转写时间
                 transcribe_time = time.time() - transcribe_start_time
@@ -278,7 +280,7 @@ def run_recording_loop(window, engine, recorder, language="auto", max_duration=3
                 stats_msg = (
                     f"录音统计: 文件大小={file_size_mb:.2f}MB, 录音时长={recording_duration:.2f}秒, "
                     f"转写时间={transcribe_time:.2f}秒, 字符数={char_count}, 中文字数={chinese_char_count}, "
-                    f"使用模型={engine.whisper_engine.model_name}, 语言={language}"
+                    f"使用模型={engine.model_name}"
                 )
                 logger.info(stats_msg)
                 window.result_text.append(f"\n--- {stats_msg} ---\n")
@@ -304,7 +306,7 @@ def run_recording_loop(window, engine, recorder, language="auto", max_duration=3
         except Exception as e:
             logger.error(f"停止录音时发生错误: {e}")
 
-def on_toggle_recording(window, engine, recorder, device_id, language):
+def on_toggle_recording(window, engine, recorder):
     """处理录音按钮点击事件"""
     # 如果当前正在录音，则停止录音
     if window.is_recording:
@@ -321,6 +323,7 @@ def on_toggle_recording(window, engine, recorder, device_id, language):
         return
         
     # 开始新的录音
+    device_id = window.get_selected_device_id()
     if device_id is None:
         logger.error("没有选择输入设备")
         window.update_status("错误: 没有选择输入设备")
@@ -331,12 +334,12 @@ def on_toggle_recording(window, engine, recorder, device_id, language):
     # 确保模型已加载
     try:
         # 先检查模型是否已加载
-        if not engine.whisper_engine.initialized:
+        if engine.model is None:
             logger.info("模型尚未加载，正在加载...")
             window.update_status("正在加载模型...")
             
-        engine.whisper_engine.ensure_model_loaded()
-        logger.info(f"使用模型: {engine.whisper_engine.model_name}")
+        engine.ensure_model_loaded()
+        logger.info(f"使用模型: {engine.model_name}")
     except Exception as e:
         logger.error(f"加载模型失败: {e}")
         window.update_status(f"加载模型失败: {str(e)}")
@@ -363,7 +366,7 @@ def on_toggle_recording(window, engine, recorder, device_id, language):
     # 使用线程进行录音和转写
     window._recording_thread = threading.Thread(
         target=run_recording_loop, 
-        args=(window, engine, recorder, language)
+        args=(window, engine, recorder)
     )
     window._recording_thread.daemon = True
     window._recording_thread.start()
@@ -391,11 +394,11 @@ def on_model_change(window, engine, model_name):
     window.update_status(f"正在切换到模型: {model_name}...")
     
     # 重置引擎状态
-    engine.whisper_engine.model = None
-    engine.whisper_engine.initialized = False
+    engine.model = None
+    engine.initialized = False
     
     # 强制设置模型名称
-    engine.whisper_engine.settings = {
+    engine.settings = {
         "model_name": model_name,
         "device": "cpu",
         "compute_type": "int8",
@@ -409,7 +412,7 @@ def on_model_change(window, engine, model_name):
         logger.info(f"开始加载模型: {model_name}")
         
         # 重新加载模型
-        engine.whisper_engine.ensure_model_loaded()
+        engine.ensure_model_loaded()
         
         window.update_status(f"已切换到模型: {model_name}")
         logger.info(f"模型切换成功: {model_name}")
@@ -420,7 +423,7 @@ def on_model_change(window, engine, model_name):
 class VoiceTyper(QObject):
     def __init__(self):
         super().__init__()
-        self.version = "0.23.41"
+        self.version = "0.23.40"
         logger.info(f"启动 Voice Typer v{self.version}")
         
         # 初始化临时目录
@@ -454,7 +457,6 @@ class VoiceTyper(QObject):
         self.window.window_signals = WindowSignals()
         
         # 连接信号
-        self.window.toggle_recording_signal.connect(lambda device_id, language: on_toggle_recording(self.window, self.engine, self.recorder, device_id, language))
         self.window.window_signals.start_recording.connect(self.on_start_recording)
         self.window.window_signals.stop_recording.connect(self.on_stop_recording)
         self.window.window_signals.download_model.connect(self.on_download_model)
@@ -591,10 +593,27 @@ class VoiceTyper(QObject):
 def main():
     # 创建应用实例
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
+    # 注意：这里改为True，让关闭最后一个窗口时退出应用
+    app.setQuitOnLastWindowClosed(True)
     
     # 创建主应用对象
     typer = VoiceTyper()
+    
+    # 创建系统托盘图标
+    icon = QIcon(create_logo_pixmap(128))
+    tray = QSystemTrayIcon(icon)
+    tray.setVisible(True)
+    
+    # 创建菜单
+    tray_menu = QMenu()
+    quit_action = QAction("退出")
+    quit_action.triggered.connect(app.quit)
+    tray_menu.addAction(quit_action)
+    tray.setContextMenu(tray_menu)
+    
+    # 保持系统托盘引用，避免过早被垃圾回收
+    app._tray_icon = tray
+    app._tray_menu = tray_menu
     
     # 进入应用主循环
     sys.exit(app.exec())
