@@ -487,6 +487,10 @@ class FloatingWindow(QMainWindow):
         self.idle_timer.timeout.connect(self.update_idle_visualization)
         self.idle_timer.start(100)  # 100毫秒更新一次
         
+        # 添加fn键监听
+        self.fn_press_time = 0
+        self.fn_press_count = 0
+        
     def toggle_right_panel(self):
         """折叠/展开右侧面板"""
         if self.right_panel.isVisible():
@@ -514,6 +518,22 @@ class FloatingWindow(QMainWindow):
         # 处理空格键触发录音
         if event.key() == Qt.Key_Space:
             self.toggle_button.click()
+            event.accept()
+            return
+            
+        # 处理fn键双击
+        if event.key() == Qt.Key_Meta:  # fn键在Qt中通常被映射为Meta键
+            current_time = time.time()
+            if current_time - self.fn_press_time < 0.3:  # 300ms内的按键认为是双击
+                self.fn_press_count += 1
+                if self.fn_press_count == 2:  # 双击检测
+                    self.fn_press_count = 0
+                    # 开始录音
+                    if not self.is_recording:
+                        self.toggle_button.click()
+            else:
+                self.fn_press_count = 1
+            self.fn_press_time = current_time
             event.accept()
             return
             

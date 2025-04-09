@@ -350,18 +350,25 @@ def build_macos():
             with open(plist_path, 'rb') as f:
                 plist_data = load(f)
             
-            plist_data['NSMicrophoneUsageDescription'] = '需要麦克风权限进行语音输入'
-            plist_data['NSAppleEventsUsageDescription'] = '需要控制其他应用以插入文本'
+            # 添加必要的权限声明
+            plist_data.update({
+                'NSMicrophoneUsageDescription': '需要麦克风权限进行语音输入',
+                'NSAppleEventsUsageDescription': '需要控制其他应用以插入文本',
+                'NSAppleEventsUsageDescription': '需要访问辅助功能以进行文本输入',
+                'NSAccessibilityUsageDescription': '需要辅助功能权限以进行文本输入',
+                'LSUIElement': True,  # 使应用在后台运行
+                'LSBackgroundOnly': False  # 允许显示UI
+            })
             
             with open(plist_path, 'wb') as f:
                 dump(plist_data, f)
             
             logger.info("已更新应用的Info.plist并添加必要的权限声明")
             
+            # 设置正确的文件权限
             import stat
             os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-            logger.info("已设置Info.plist权限: 644")
-        
+            
         except Exception as e:
             logger.error(f"修改Info.plist时出错: {e}")
             return False

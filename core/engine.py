@@ -28,6 +28,7 @@ class WhisperEngine:
         self.buffer = []  # 用于实时转写的音频数据缓冲区
         self.buffer_size = 0  # 当前缓冲区大小(字节)
         self.available_models = self._detect_models()
+        self.max_buffer_size = 1024 * 1024 * 10  # 限制缓冲区大小为10MB
         
     def _detect_models(self) -> List[Dict[str, Any]]:
         """检测已下载的模型，返回可用模型列表"""
@@ -200,32 +201,34 @@ class WhisperEngine:
         if self.model is not None:
             return
             
-        # 获取最优配置
-        if not self.settings:
-            self.settings = self.get_optimal_settings()
-            
-        model_name = self.settings["model_name"]
-        device = self.settings["device"]
-        compute_type = self.settings["compute_type"]
-        beam_size = self.settings["beam_size"]
-        threads = self.settings.get("threads", min(psutil.cpu_count(), 4))
-        
         try:
-            from faster_whisper import WhisperModel
+            # 获取设置
+            if not self.settings:
+                self.settings = self.get_optimal_settings()
             
-            self.logger.info(f"Loading model: {model_name} with settings: {self.settings}")
+            model_name = self.settings["model_name"]
+            compute_type = self.settings["compute_type"]
+            device = self.settings["device"]
+            cpu_threads = self.settings["threads"]
+            
+            # 设置环境变量
+            os.environ["OMP_NUM_THREADS"] = str(cpu_threads)
+            os.environ["MKL_NUM_THREADS"] = str(cpu_threads)
+            
+            # 加载模型
+            self.logger.info(f"Loading model {model_name} with {cpu_threads} threads...")
             self.model = WhisperModel(
-                model_size_or_path=model_name,
+                model_name,
                 device=device,
                 compute_type=compute_type,
-                download_root=self.config.models_dir if hasattr(self.config, "models_dir") else None,
-                cpu_threads=threads
+                cpu_threads=cpu_threads,
+                download_root=self.config.models_dir
             )
             self.model_name = model_name
             self.initialized = True
-            self.logger.info("模型加载成功")
+            
         except Exception as e:
-            self.logger.error(f"加载模型失败: {e}")
+            self.logger.error(f"加载模型时出错: {str(e)}")
             raise
                 
     def download_model(self, model_name="large-v3"):
@@ -282,100 +285,88 @@ class WhisperEngine:
             return None
     
     def transcribe(self, audio_file: str, language="zh", initial_prompt=None, target_language=None) -> str:
-        """使用批量模式转写音频文件，返回完整文本
-        Args:
-            audio_file: 音频文件路径
-            language: 音频的语言，默认为zh（中文），设置为auto则自动检测
-            initial_prompt: 初始提示，用于引导转写
-            target_language: 目标语言代码，用于翻译
-        """
-        if not os.path.exists(audio_file):
-            self.logger.error(f"音频文件不存在: {audio_file}")
-            return "错误：音频文件不存在"
-            
+        """使用批量模式转写音频文件，返回完整文本"""
         try:
             self.ensure_model_loaded()
             
-            self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}, target_language: {target_language}")
-            
-            # 转写音频时捕获并安全释放资源
             try:
-                # 转写音频
-                beam_size = self.settings.get("beam_size", 5)
+                self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}, target_language: {target_language}")
                 
-                # 根据是否需要翻译设置任务类型和参数
-                if target_language and target_language != language:
-                    # 翻译任务
-                    task = "translate"
-                    # 确保faster-whisper使用正确的语言参数
-                    segments, info = self.model.transcribe(
-                        audio_file,
-                        beam_size=beam_size,
-                        language=None if language == "auto" else language,  # 源语言
-                        initial_prompt=initial_prompt,
-                        task=task,  # 翻译任务
-                        vad_filter=True,
-                        vad_parameters=dict(min_silence_duration_ms=500),
-                        # 明确指定翻译目标语言
-                        translate_to=target_language
-                    )
-                else:
-                    # 普通转写任务
-                    task = "transcribe"
-                    segments, info = self.model.transcribe(
-                        audio_file,
-                        beam_size=beam_size,
-                        language=None if language == "auto" else language,
-                        initial_prompt=initial_prompt,
-                        task=task,
-                        vad_filter=True,
-                        vad_parameters=dict(min_silence_duration_ms=500)
-                    )
+                # 设置转写参数
+                beam_size = 1  # 降低beam_size减少内存使用
                 
-                # 记录语言检测结果和翻译信息
-                detected_language = info.language if hasattr(info, "language") else "unknown"
-                language_probability = info.language_probability if hasattr(info, "language_probability") else 0.0
+                # 如果需要翻译，使用task参数
+                task = "translate" if target_language and target_language != language else "transcribe"
                 
-                self.logger.info(f"Detected language: {detected_language} (probability: {language_probability})")
-                if target_language and target_language != language:
-                    self.logger.info(f"Translating to: {target_language}")
+                # 使用正确的参数调用transcribe
+                segments, info = self.model.transcribe(
+                    audio_file,
+                    language=language if language != "auto" else None,
+                    initial_prompt=initial_prompt,
+                    beam_size=beam_size,
+                    word_timestamps=False,  # 禁用词级时间戳以减少内存使用
+                    condition_on_previous_text=False,
+                    temperature=0.0,
+                    compression_ratio_threshold=2.4,
+                    no_speech_threshold=0.6,
+                    vad_filter=True,
+                    vad_parameters={"min_silence_duration_ms": 500},
+                    task=task  # 使用task参数替代translate参数
+                )
                 
-                # 立即收集所有片段文本并释放segments引用，防止内存访问错误
-                transcript = ""
+                # 立即处理segments
+                transcript_parts = []
                 for segment in segments:
-                    transcript += segment.text + " "
-                    
-                # 显式删除segments和info，避免后续访问可能导致的内存错误
+                    if segment.text:
+                        transcript_parts.append(segment.text)
+                
+                # 合并文本
+                transcript = " ".join(transcript_parts)
+                del transcript_parts
+                
+                # 显式删除segments和info
                 del segments
                 del info
                 
                 # 清理文本
                 transcript = transcript.strip()
                 
-                # 校验结果是否为空或者广告内容
+                # 校验结果
                 if not transcript or "感谢使用" in transcript:
                     self.logger.warning("转写结果为空或全是广告内容")
                     return "请说话..."
-                    
+                
                 return transcript
+                
             except Exception as e:
                 self.logger.error(f"转写音频过程中出错: {str(e)}")
-                # 捕获内部错误但继续抛出
                 raise
-            finally:
-                # 确保清理所有资源
-                if hasattr(self, 'model') and self.model is not None:
-                    try:
-                        # 显式释放模型资源
-                        del self.model
-                        self.model = None
-                    except Exception as e:
-                        self.logger.error(f"释放模型资源时出错: {str(e)}")
                 
         except Exception as e:
             self.logger.error(f"转写过程中出错: {str(e)}")
             return f"错误：{str(e)}"
             
+        finally:
+            # 确保清理所有资源
+            try:
+                # 显式释放模型资源
+                if hasattr(self, 'model') and self.model is not None:
+                    try:
+                        # 保存模型引用并清空
+                        model = self.model
+                        self.model = None
+                        # 删除模型引用
+                        del model
+                    except Exception as e:
+                        self.logger.error(f"释放模型时出错: {e}")
+                
+                # 强制垃圾回收
+                import gc
+                gc.collect()
+                
+            except Exception as e:
+                self.logger.error(f"清理资源时出错: {str(e)}")
+                
     def add_audio_chunk(self, audio_chunk: bytes) -> None:
         """添加音频数据块到缓冲区，用于实时转写"""
         self.buffer.append(audio_chunk)
@@ -387,104 +378,52 @@ class WhisperEngine:
         self.buffer_size = 0
         
     def get_realtime_transcription(self, language="zh", target_language=None) -> Optional[str]:
-        """实时转写当前缓冲区中的音频数据
-        Args:
-            language: 音频的语言，默认为zh（中文），设置为auto则自动检测
-            target_language: 目标语言代码，用于翻译
-        """
+        """实时转写当前缓冲区中的音频数据"""
         if not self.buffer or self.buffer_size == 0:
             return None
             
         try:
             self.ensure_model_loaded()
-
-            # 如果缓冲区太小，可能无法有效识别
-            if self.buffer_size < 8000:  # 至少需要0.5秒的音频(16000Hz采样率，16位)
-                return None
-                
+            
+            # 如果缓冲区太大，清理旧数据
+            if self.buffer_size > self.max_buffer_size:
+                self.logger.warning("缓冲区超过最大大小限制，清理旧数据")
+                while self.buffer_size > self.max_buffer_size:
+                    old_chunk = self.buffer.pop(0)
+                    self.buffer_size -= len(old_chunk)
+            
             # 将缓冲区数据保存为临时文件
             temp_file_path = None
             try:
-                # 使用更安全的方式处理临时文件
-                temp_dir = tempfile.gettempdir()
-                temp_file_path = os.path.join(temp_dir, f"whisper_temp_{int(time.time()*1000)}.wav")
-                
-                # 写入WAV头
-                wf = wave.open(temp_file_path, 'wb')
-                wf.setnchannels(1)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(16000)
-                
-                # 创建并写入缓冲区数据的副本，避免原始数据被修改
-                buffer_copy = self.buffer.copy()
-                all_audio_data = b''.join(buffer_copy)
-                wf.writeframes(all_audio_data)
-                wf.close()
+                # 创建临时文件
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+                    temp_file_path = temp_file.name
+                    
+                    # 创建WAV文件
+                    with wave.open(temp_file_path, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(16000)
+                        for chunk in self.buffer:
+                            wf.writeframes(chunk)
                 
                 # 转写临时文件
-                beam_size = self.settings.get("beam_size", 5)
+                transcript = self.transcribe(
+                    temp_file_path,
+                    language=language,
+                    target_language=target_language
+                )
                 
-                # 根据是否需要翻译设置任务类型和参数
-                if target_language and target_language != language:
-                    # 翻译任务
-                    task = "translate"
-                    # 确保faster-whisper使用正确的语言参数
-                    segments, info = self.model.transcribe(
-                        temp_file_path,
-                        beam_size=3,  # 使用较小的beam size以提高速度
-                        language=None if language == "auto" else language,  # 源语言
-                        task=task,  # 翻译任务
-                        vad_filter=True,
-                        vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
-                        word_timestamps=False,  # 不需要单词级时间戳
-                        condition_on_previous_text=True,  # 利用上下文改善实时体验
-                        no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
-                        # 明确指定翻译目标语言
-                        translate_to=target_language
-                    )
-                else:
-                    # 普通转写任务
-                    task = "transcribe"
-                    segments, info = self.model.transcribe(
-                        temp_file_path,
-                        beam_size=3,  # 使用较小的beam size以提高速度
-                        language=None if language == "auto" else language,
-                        task=task,
-                        vad_filter=True,
-                        vad_parameters=dict(min_silence_duration_ms=300),  # 减少静音判断时间
-                        word_timestamps=False,  # 不需要单词级时间戳
-                        condition_on_previous_text=True,  # 利用上下文改善实时体验
-                        no_speech_threshold=0.3,  # 降低无语音阈值，更积极地识别
-                    )
-                
-                # 立即提取文本并释放segments引用
-                transcript = ""
-                for segment in segments:
-                    transcript += segment.text + " "
-                
-                # 显式释放资源
-                del segments
-                del info
-                del buffer_copy
-                
-                transcript = transcript.strip()
-                
-                # 结果处理
-                if not transcript:
-                    return None
-                    
                 return transcript
-            except Exception as e:
-                self.logger.error(f"实时转写音频文件处理过程中出错: {str(e)}")
-                return None
+                
             finally:
-                # 确保临时文件被删除
+                # 清理临时文件
                 if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.unlink(temp_file_path)
-                    except Exception as cleanup_err:
-                        self.logger.warning(f"无法删除临时文件: {cleanup_err}")
-                
+                    except Exception as e:
+                        self.logger.warning(f"无法删除临时文件: {e}")
+                        
         except Exception as e:
             self.logger.error(f"实时转写过程中出错: {str(e)}")
             return None 
