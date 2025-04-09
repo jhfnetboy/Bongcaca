@@ -1,11 +1,12 @@
 # VoiceTyper/蹦擦擦
+语音（转文字）输入助手，不限时，不联网，你说三个小时都行。
 自娱自乐的一个小工具，可能对大家有点用，持续改进中。
 因为打字太累，想解放双手。
 ## Features
 1. 目前是Mac版本先发布，Windows后面再说
 2. 语音输入后转化为文字，自动进入剪贴板
-3. 现在支持多语言了，中文语音直接转换为英语，韩语，泰语啥的
-4. 对于8GB RAM电脑：建议medium 模型；16GB可以使用 large-v3 模型，对于4GB RAM电脑：建议使用 small 模型
+3. 现在支持多语言（默认中文，可选直接转换为英语，韩语，泰语等等）
+4. 8GB内存电脑：建议medium 模型；16GB内存可以用 large-v3 模型，4GB内存电脑：建议用 small 模型
 
 ![](https://raw.githubusercontent.com/jhfnetboy/MarkDownImg/main/img/202504091418521.png)
 ![](https://raw.githubusercontent.com/jhfnetboy/MarkDownImg/main/img/202504091418523.png)
