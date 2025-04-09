@@ -423,7 +423,7 @@ def on_model_change(window, engine, model_name):
 class VoiceTyper(QObject):
     def __init__(self):
         super().__init__()
-        self.version = "0.23.40"
+        self.version = "0.23.41"
         logger.info(f"启动 Voice Typer v{self.version}")
         
         # 初始化临时目录
@@ -593,6 +593,11 @@ class VoiceTyper(QObject):
 def main():
     # 创建应用实例
     app = QApplication(sys.argv)
+    
+    # 设置应用图标
+    app_icon = create_app_icon()
+    app.setWindowIcon(app_icon)
+    
     # 注意：这里改为True，让关闭最后一个窗口时退出应用
     app.setQuitOnLastWindowClosed(True)
     
@@ -600,8 +605,7 @@ def main():
     typer = VoiceTyper()
     
     # 创建系统托盘图标
-    icon = QIcon(create_logo_pixmap(128))
-    tray = QSystemTrayIcon(icon)
+    tray = QSystemTrayIcon(app_icon)
     tray.setVisible(True)
     
     # 创建菜单

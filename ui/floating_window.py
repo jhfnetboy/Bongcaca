@@ -48,26 +48,34 @@ class AudioVisualizer(QWidget):
         # 绘制背景
         painter.fillRect(self.rect(), QColor(240, 240, 240))
         
-        # 绘制波形
+        # 简化绘制过程，避免过于复杂的操作
         width = self.width()
         height = self.height()
         bar_width = width / self.max_levels
-        x = 0
         
-        for level in self.levels:
-            bar_height = (level / 100) * height
-            y = (height - bar_height) / 2
-            
-            # 根据音量大小设置颜色
-            if level > 50:
-                color = QColor(255, 0, 128)  # 深粉色
-            elif level > 20:
-                color = QColor(255, 105, 180)  # 粉色
-            else:
-                color = QColor(255, 182, 193)  # 浅粉色
+        try:
+            # 使用循环绘制每个音频级别的条形
+            x = 0
+            for level in self.levels:
+                # 计算条形高度
+                bar_height = max(4, (level / 100.0) * height)
+                y = (height - bar_height) / 2
                 
-            painter.fillRect(x, y, bar_width, bar_height, color)
-            x += bar_width
+                # 根据音量大小设置颜色
+                if level > 50:
+                    color = QColor(255, 0, 128)  # 深粉色
+                elif level > 20:
+                    color = QColor(255, 105, 180)  # 粉色
+                else:
+                    color = QColor(255, 182, 193)  # 浅粉色
+                    
+                # 绘制矩形
+                painter.fillRect(int(x), int(y), int(bar_width), int(bar_height), color)
+                x += bar_width
+        except Exception as e:
+            self.logger.error(f"绘制波形时出错: {e}")
+            # 如果出错，绘制简单的占位符
+            painter.fillRect(0, height/3, width, height/3, QColor(255, 182, 193))
 
 class ToggleButton(QPushButton):
     def __init__(self, parent=None):
@@ -83,25 +91,50 @@ class ToggleButton(QPushButton):
         """)
         
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        if not self.is_recording:
-            # 绘制绿色三角形(开始)
-            painter.setBrush(QColor(0, 200, 0))  # 绿色三角形
-            painter.setPen(Qt.NoPen)
-            points = [
-                QPointF(15, 10),
-                QPointF(15, 30),
-                QPointF(30, 20)
-            ]
-            painter.drawPolygon(points)
-        else:
-            # 绘制红色方块(停止)
-            painter.setBrush(QColor(255, 0, 0))  # 红色方块
-            painter.setPen(Qt.NoPen)
-            painter.drawRect(12, 12, 16, 16)
+        try:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
             
+            # 绘制背景
+            painter.setBrush(QColor(255, 255, 255))
+            painter.setPen(QColor(204, 204, 204))
+            painter.drawEllipse(2, 2, self.width()-4, self.height()-4)
+            
+            if not self.is_recording:
+                # 绘制绿色三角形(开始)
+                painter.setBrush(QColor(0, 200, 0))  # 绿色三角形
+                painter.setPen(Qt.NoPen)
+                
+                # 使用整数坐标，避免浮点数问题
+                points = [
+                    (15, 10),
+                    (15, 30),
+                    (30, 20)
+                ]
+                
+                # 创建多边形路径
+                path = QPainterPath()
+                path.moveTo(points[0][0], points[0][1])
+                for x, y in points[1:]:
+                    path.lineTo(x, y)
+                path.closeSubpath()
+                
+                # 填充路径
+                painter.fillPath(path, QColor(0, 200, 0))
+            else:
+                # 绘制红色方块(停止)
+                painter.setBrush(QColor(255, 0, 0))  # 红色方块
+                painter.setPen(Qt.NoPen)
+                painter.drawRect(12, 12, 16, 16)
+                
+        except Exception as e:
+            # 出错时使用最简单的绘制方式
+            painter = QPainter(self)
+            if not self.is_recording:
+                painter.fillRect(10, 10, 20, 20, QColor(0, 200, 0))
+            else:
+                painter.fillRect(10, 10, 20, 20, QColor(255, 0, 0))
+        
     def set_recording(self, is_recording):
         self.is_recording = is_recording
         self.update()
@@ -240,16 +273,8 @@ class FloatingWindow(QMainWindow):
         layout.addWidget(self.device_combo)
         
         # 添加语言选择框
-        language_label = QLabel("Select Language:")
-        language_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(language_label)
-        
-        self.language_combo = QComboBox()
-        self.language_combo.addItem("自动", "auto")
-        self.language_combo.addItem("中文", "zh")
-        self.language_combo.addItem("英文", "en")
-        self.language_combo.setCurrentIndex(0)  # 默认选择自动检测
-        layout.addWidget(self.language_combo)
+        language_layout = self.init_language_options()
+        layout.addLayout(language_layout)
         
         # 添加模型选择框
         model_label = QLabel("Select Model:")
@@ -866,23 +891,24 @@ class FloatingWindow(QMainWindow):
         self.language_combo.clear()
         
         # 添加自动检测选项
-        self.language_combo.addItem("自动检测", "auto")
+        self.language_combo.addItem("Auto detect", "auto")
         
         # 根据模型添加特定语言选项
         if "en" in model_name:
             # 英文专用模型
-            self.language_combo.addItem("英文", "en")
+            self.language_combo.addItem("English", "en")
         else:
             # 通用多语言模型
-            self.language_combo.addItem("中文", "zh")
-            self.language_combo.addItem("英文", "en")
+            self.language_combo.addItem("Chinese", "zh")
+            self.language_combo.addItem("English", "en")
             # 添加其他主要语言
-            self.language_combo.addItem("日语", "ja")
-            self.language_combo.addItem("韩语", "ko")
-            self.language_combo.addItem("法语", "fr")
-            self.language_combo.addItem("德语", "de")
-            self.language_combo.addItem("西班牙语", "es")
-            self.language_combo.addItem("俄语", "ru")
+            self.language_combo.addItem("Japanese", "ja")
+            self.language_combo.addItem("Korean", "ko")
+            self.language_combo.addItem("French", "fr")
+            self.language_combo.addItem("German", "de")
+            self.language_combo.addItem("Spanish", "es")
+            self.language_combo.addItem("Russian", "ru")
+            self.language_combo.addItem("Thai", "th")
             
         # 尝试恢复之前的选择
         if current_lang:
@@ -1014,16 +1040,15 @@ class FloatingWindow(QMainWindow):
     
     def update_idle_visualization(self):
         """在非录音状态下更新波形显示"""
-        if not self.is_recording and hasattr(self, 'visualizer'):
-            # 使用AudioRecorder的get_audio_level方法获取随机值
-            from core.recorder import AudioRecorder
-            recorder = getattr(self, '_temp_recorder', None)
-            if recorder is None:
-                recorder = AudioRecorder()
-                self._temp_recorder = recorder
-            
-            level = recorder.get_audio_level()
-            self.update_audio_level(level)
+        try:
+            if not self.is_recording and hasattr(self, 'audio_viz'):
+                # 生成随机音频级别，避免调用外部方法
+                import random
+                level = random.randint(5, 15)  # 非录音状态下保持较低的音量波动
+                self.update_audio_level(level)
+        except Exception as e:
+            # 忽略错误，这只是视觉效果
+            pass
 
     def show_about_dialog(self):
         """显示关于对话框"""
@@ -1075,6 +1100,48 @@ class FloatingWindow(QMainWindow):
                 if self.model_combo.itemData(i) == current_model:
                     self.model_combo.setCurrentIndex(i)
                     break
+
+    def init_language_options(self):
+        """初始化语言选择下拉菜单"""
+        self.logger.debug("初始化语言选择下拉菜单")
+        
+        language_layout = QHBoxLayout()
+        language_label = QLabel("Translate your voice to:")
+        language_label.setStyleSheet("font-weight: bold;")
+        
+        self.language_combo = QComboBox()
+        self.language_combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 3px;
+                min-width: 100px;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #ccc;
+                background-color: rgba(255, 255, 255, 153);
+                selection-background-color: #3778b7;
+                selection-color: white;
+            }
+        """)
+        
+        # 连接信号
+        self.language_combo.currentIndexChanged.connect(self.on_language_changed)
+        
+        language_layout.addWidget(language_label)
+        language_layout.addWidget(self.language_combo)
+        language_layout.addStretch(1)
+        
+        return language_layout
+
+    def on_language_changed(self, index):
+        """语言选择变更事件"""
+        if index >= 0:
+            language = self.language_combo.currentData()
+            language_name = self.language_combo.currentText()
+            if language:
+                self.logger.info(f"已选择语言: {language_name} ({language})")
+                # 如果需要，这里可以触发信号
 
     class LogHandler(logging.Handler):
         def __init__(self, window):
