@@ -6,6 +6,8 @@ from Quartz import (
     CFRunLoopRun,
     CGEventTapCreate,
     CGEventMaskBit,
+    CGEventGetFlags,
+    kCFRunLoopCommonModes,
     kCGEventFlagMaskSecondaryFn,
     kCGEventKeyDown,
     kCGEventKeyUp,
