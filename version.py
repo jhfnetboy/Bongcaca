@@ -1,4 +1,4 @@
-VERSION = "0.3.1"  # 性能优化版本
+VERSION = "0.3.2"  # 修复转写参数错误
 
 def get_version():
-    return "0.3.1" 
+    return "0.3.2" 

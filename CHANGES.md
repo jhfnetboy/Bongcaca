@@ -1,5 +1,10 @@
 # 更新日志
 
+## 2024-05-23 (0.3.2) - 修复转写参数错误
+- 🐛 修复：移除不支持的batch_size参数，解决转写时的参数错误
+- 修复：`WhisperModel.transcribe() got an unexpected keyword argument 'batch_size'` 错误
+- 保持：其他性能优化保持不变，仅修复兼容性问题
+
 ## 2024-05-23 (0.3.1) - 性能优化完成
 - 🚀 完成核心业务函数性能优化
 - 优化：模型加载机制重构，添加线程安全和智能缓存 `ensure_model_loaded()`

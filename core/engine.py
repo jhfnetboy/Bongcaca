@@ -332,10 +332,8 @@ class WhisperEngine:
                 # 根据文件大小动态调整参数
                 if is_large_file:
                     beam_size = 3  # 大文件使用更小的beam_size
-                    batch_size = 8  # 增加批处理大小
                 else:
                     beam_size = 1  # 小文件保持最小beam_size
-                    batch_size = 4
                 
                 # 如果需要翻译，使用task参数
                 task = "translate" if target_language and target_language != language else "transcribe"
@@ -349,7 +347,6 @@ class WhisperEngine:
                     language=language if language != "auto" else None,
                     initial_prompt=initial_prompt,
                     beam_size=beam_size,
-                    batch_size=batch_size,  # 新增批处理大小
                     word_timestamps=False,  # 禁用词级时间戳以减少内存使用
                     condition_on_previous_text=False,
                     temperature=0.0,
