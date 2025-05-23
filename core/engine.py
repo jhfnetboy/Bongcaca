@@ -298,7 +298,7 @@ class WhisperEngine:
                 # 如果需要翻译，使用task参数
                 task = "translate" if target_language and target_language != language else "transcribe"
                 
-                # 使用正确的参数调用transcribe
+                # 使用更宽松的VAD参数，特别适合虚拟音频设备和低音量输入
                 segments, info = self.model.transcribe(
                     audio_file,
                     language=language if language != "auto" else None,
@@ -308,9 +308,13 @@ class WhisperEngine:
                     condition_on_previous_text=False,
                     temperature=0.0,
                     compression_ratio_threshold=2.4,
-                    no_speech_threshold=0.6,
+                    no_speech_threshold=0.3,  # 降低无语音阈值，从0.6降低到0.3
                     vad_filter=True,
-                    vad_parameters={"min_silence_duration_ms": 500},
+                    vad_parameters={
+                        "min_silence_duration_ms": 200,  # 减少最小静音时长，从500ms降低到200ms
+                        "speech_pad_ms": 100,            # 语音填充，在检测到的语音前后添加填充
+                        "threshold": 0.3                  # 降低VAD检测阈值，从默认0.5降低到0.3
+                    },
                     task=task  # 使用task参数替代translate参数
                 )
                 
@@ -331,11 +335,18 @@ class WhisperEngine:
                 # 清理文本
                 transcript = transcript.strip()
                 
-                # 校验结果
-                if not transcript or "感谢使用" in transcript:
-                    self.logger.warning("转写结果为空或全是广告内容")
+                # 校验结果 - 放宽条件，允许更多内容通过
+                if not transcript:
+                    self.logger.warning("转写结果为空")
+                    return "未检测到语音内容，请确保麦克风正常工作并重试"
+                elif len(transcript) < 3:  # 如果结果太短，也可能是噪音
+                    self.logger.warning(f"转写结果过短: {transcript}")
+                    return "检测到音频但无法识别，请说话清晰一些"
+                elif "感谢使用" in transcript or "广告" in transcript:
+                    self.logger.warning("转写结果包含广告内容")
                     return "请说话..."
                 
+                self.logger.info(f"转写成功，结果长度: {len(transcript)}")
                 return transcript
                 
             except Exception as e:
@@ -349,18 +360,8 @@ class WhisperEngine:
         finally:
             # 确保清理所有资源
             try:
-                # 显式释放模型资源
-                if hasattr(self, 'model') and self.model is not None:
-                    try:
-                        # 保存模型引用并清空
-                        model = self.model
-                        self.model = None
-                        # 删除模型引用
-                        del model
-                    except Exception as e:
-                        self.logger.error(f"释放模型时出错: {e}")
-                
-                # 强制垃圾回收
+                # 不要删除模型，保持模型加载状态
+                # 只进行轻量级清理
                 import gc
                 gc.collect()
                 

@@ -454,24 +454,29 @@ def main():
     try:
         from core.engine import WhisperEngine
         from core.recorder import AudioRecorder
+        from core.hotkey_listener import HotkeyListener
         
-        # 初始化语音引擎
+        # 初始化组件
         engine = WhisperEngine(config)
-        
-        # 初始化录音器
         recorder = AudioRecorder()
+        hotkey_listener = HotkeyListener()
         
-        # 设置回调
         def setup_callbacks(window):
+            # 保持原有的回调设置不变
             window.on_toggle_recording = lambda: on_toggle_recording(window, engine, recorder)
-            # 连接信号到回调函数
             window.toggle_recording_signal.connect(lambda: on_toggle_recording(window, engine, recorder))
-            # 连接设备变更信号
             window.device_changed.connect(recorder.set_device)
-            # 连接模式切换信号
             window.transcription_mode_changed.connect(lambda mode: logger.info(f"转写模式已切换为: {mode}"))
-            # 连接模型变更信号
             window.model_changed.connect(lambda model: on_model_change(window, engine, model))
+            
+            # 添加fn双击快捷键支持
+            def on_fn_double_click():
+                logger.info("触发fn双击快捷键")
+                if not window.is_recording:
+                    window.toggle_button.click()
+            
+            # 启动全局快捷键监听
+            hotkey_listener.start(on_fn_double_click)
         
         # 运行GUI应用
         from PySide6.QtWidgets import QApplication

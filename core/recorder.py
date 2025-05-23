@@ -56,9 +56,21 @@ class AudioRecorder:
                 try:
                     device_info = self.pyaudio.get_device_info_by_index(i)
                     if device_info and device_info.get('maxInputChannels') > 0:
-                        devices.append((i, device_info.get('name')))
+                        device_name = device_info.get('name')
+                        sample_rate = device_info.get('defaultSampleRate', 44100)
+                        self.logger.debug(f"Found input device: ID={i}, Name={device_name}, "
+                                        f"Channels={device_info.get('maxInputChannels')}, "
+                                        f"SampleRate={sample_rate}")
+                        devices.append((i, device_name))
                 except Exception as e:
                     self.logger.error(f"获取设备 {i} 信息失败: {e}")
+            
+            if not devices:
+                self.logger.warning("未检测到任何音频输入设备，这可能是由于：")
+                self.logger.warning("1. 没有连接麦克风或音频输入设备")
+                self.logger.warning("2. macOS隐私设置阻止了麦克风访问")
+                self.logger.warning("3. 音频驱动问题")
+                
             return devices
         except Exception as e:
             self.logger.error(f"获取输入设备列表失败: {e}")
@@ -90,8 +102,14 @@ class AudioRecorder:
             
         # 检查设备
         if self.device_index is None:
-            self.logger.error("未指定录音设备")
-            return False
+            # 如果没有指定设备，尝试使用第一个可用设备
+            devices = self.get_input_devices()
+            if devices:
+                self.device_index = devices[0][0]
+                self.logger.info(f"自动选择第一个可用设备: {devices[0][1]} (ID: {self.device_index})")
+            else:
+                self.logger.error("未找到可用的录音设备")
+                return False
             
         # 验证设备是否存在
         try:
@@ -100,7 +118,13 @@ class AudioRecorder:
                 self.logger.error(f"设备ID {self.device_index} 不存在")
                 return False
                 
-            self.logger.info(f"使用录音设备: {device_info.get('name')} (ID: {self.device_index})")
+            device_name = device_info.get('name')
+            max_channels = device_info.get('maxInputChannels', 0)
+            default_rate = device_info.get('defaultSampleRate', 44100)
+            
+            self.logger.info(f"使用录音设备: {device_name} (ID: {self.device_index})")
+            self.logger.info(f"设备参数: 最大输入通道={max_channels}, 默认采样率={default_rate}")
+            
         except Exception as e:
             self.logger.error(f"验证设备ID {self.device_index} 失败: {e}")
             return False
@@ -114,14 +138,50 @@ class AudioRecorder:
             except Exception as e:
                 self.logger.warning(f"播放提示音失败: {e}")
             
-            self.stream = self.pyaudio.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=16000,
-                input=True,
-                input_device_index=self.device_index,
-                frames_per_buffer=1024
-            )
+            # 尝试不同的音频参数配置
+            audio_configs = [
+                # 配置1: 标准16kHz单声道
+                {'format': pyaudio.paInt16, 'channels': 1, 'rate': 16000, 'frames_per_buffer': 1024},
+                # 配置2: 设备默认采样率，然后重采样
+                {'format': pyaudio.paInt16, 'channels': 1, 'rate': int(default_rate), 'frames_per_buffer': 1024},
+                # 配置3: 更大的缓冲区
+                {'format': pyaudio.paInt16, 'channels': 1, 'rate': 16000, 'frames_per_buffer': 2048},
+            ]
+            
+            stream_created = False
+            for i, config in enumerate(audio_configs):
+                try:
+                    self.logger.info(f"尝试音频配置 {i+1}: {config}")
+                    self.stream = self.pyaudio.open(
+                        format=config['format'],
+                        channels=config['channels'],
+                        rate=config['rate'],
+                        input=True,
+                        input_device_index=self.device_index,
+                        frames_per_buffer=config['frames_per_buffer']
+                    )
+                    
+                    # 测试读取一小段数据
+                    test_data = self.stream.read(config['frames_per_buffer'], exception_on_overflow=False)
+                    if test_data:
+                        self.logger.info(f"音频配置 {i+1} 测试成功")
+                        stream_created = True
+                        # 保存采样率信息以备后用
+                        self._recording_sample_rate = config['rate']
+                        break
+                    
+                except Exception as e:
+                    self.logger.warning(f"音频配置 {i+1} 失败: {e}")
+                    if self.stream:
+                        try:
+                            self.stream.close()
+                        except:
+                            pass
+                        self.stream = None
+            
+            if not stream_created:
+                self.logger.error("所有音频配置都失败")
+                return False
             
             self.frames = []
             self.is_recording = True
@@ -142,7 +202,10 @@ class AudioRecorder:
         except Exception as e:
             self.logger.error(f"Error starting recording: {str(e)}")
             if self.stream:
-                self.stream.close()
+                try:
+                    self.stream.close()
+                except:
+                    pass
                 self.stream = None
             self.is_recording = False
             return False
@@ -263,37 +326,72 @@ class AudioRecorder:
             self.logger.debug("Recording thread started")
             time_since_last_level_log = 0
             
+            # 获取录音参数
+            sample_rate = getattr(self, '_recording_sample_rate', 16000)
+            self.logger.info(f"录音参数: 采样率={sample_rate}Hz")
+            
             while self.is_recording:
                 try:
                     start_time = time.time()
                     data = self.stream.read(1024, exception_on_overflow=False)
+                    
+                    # 如果采样率不是16kHz，需要重采样到16kHz保存
+                    if sample_rate != 16000:
+                        # 简单的重采样（实际项目中可能需要更复杂的重采样算法）
+                        # 这里暂时保存原始数据，在保存文件时处理
+                        pass
+                    
                     with self.lock:
                         self.frames.append(data)
                     
-                    # 计算音频电平
-                    audio_array = np.frombuffer(data, dtype=np.int16)
-                    abs_data = np.abs(audio_array)
-                    level = 0
-                    
-                    if len(abs_data) > 0:
-                        # 计算更准确的音频电平
-                        # 1. 计算RMS (root mean square)
-                        mean_squared = np.mean(abs_data**2)
-                        # 确保值有效并避免无效值错误
-                        if mean_squared > 0:
-                            rms = np.sqrt(mean_squared)
-                            # 2. 归一化到0-100的范围，使用对数比例
-                            # 增强音频电平显示，使其对低音量更敏感
-                            normalized_level = np.log10(max(1, rms)) / np.log10(32768) * 100
-                            # 提高低音量显示的灵敏度
-                            level = min(100, max(0, int(normalized_level * 1.5)))
-                    
-                    self.current_audio_level = level
+                    # 计算音频电平 - 改进的算法
+                    try:
+                        audio_array = np.frombuffer(data, dtype=np.int16)
+                        
+                        if len(audio_array) > 0:
+                            # 方法1: 计算RMS (root mean square)
+                            abs_data = np.abs(audio_array.astype(np.float64))  # 使用float64避免溢出
+                            mean_squared = np.mean(abs_data**2)
+                            
+                            if mean_squared > 0:
+                                rms = np.sqrt(mean_squared)
+                                # 归一化到0-100的范围
+                                # 针对不同的音频设备调整灵敏度
+                                max_value = 32768.0  # int16的最大值
+                                normalized_level = (rms / max_value) * 100
+                                
+                                # 应用对数缩放以提高低音量的可见性
+                                if normalized_level > 0:
+                                    log_level = np.log10(max(0.1, normalized_level)) * 50 + 50
+                                    level = min(100, max(0, int(log_level)))
+                                else:
+                                    level = 0
+                                    
+                                # 对于非常低的输入（如虚拟音频设备），提供额外的增益
+                                if level < 5 and rms > 0:
+                                    level = min(50, int(rms / 100))  # 给予一些基础电平
+                                    
+                            else:
+                                level = 0
+                        else:
+                            level = 0
+                            
+                        # 平滑处理，避免电平跳动过于剧烈
+                        if hasattr(self, '_last_level'):
+                            alpha = 0.3  # 平滑系数
+                            level = int(alpha * level + (1 - alpha) * self._last_level)
+                        self._last_level = level
+                        
+                        self.current_audio_level = level
+                        
+                    except Exception as e:
+                        self.logger.warning(f"计算音频电平时出错: {e}")
+                        self.current_audio_level = 0
                     
                     # 每秒记录一次音频电平
                     time_since_last_level_log += time.time() - start_time
-                    if time_since_last_level_log >= 0.5:  # 改为每0.5秒记录一次
-                        self.logger.debug(f"Current audio level: {self.current_audio_level}")
+                    if time_since_last_level_log >= 1.0:  # 改为每1秒记录一次
+                        self.logger.debug(f"当前音频电平: {self.current_audio_level}%, 数据长度: {len(data)}")
                         time_since_last_level_log = 0
                     
                     # 实时转写模式处理
@@ -318,12 +416,13 @@ class AudioRecorder:
                                 self.logger.debug(f"发送实时音频数据块，音频电平: {self.current_audio_level}")
                 except IOError as e:
                     # 捕获常见的音频流错误并记录
-                    self.logger.error(f"Audio stream error: {e}")
                     if "Input overflowed" in str(e):
                         # 输入溢出通常不是严重问题，可以继续
+                        self.logger.debug("音频输入溢出（这通常是正常的）")
                         continue
                     else:
                         # 其他IO错误可能需要停止录音
+                        self.logger.error(f"Audio stream error: {e}")
                         self.is_recording = False
                         break
                 except Exception as e:
