@@ -330,10 +330,18 @@ class AudioRecorder:
             sample_rate = getattr(self, '_recording_sample_rate', 16000)
             self.logger.info(f"录音参数: 采样率={sample_rate}Hz")
             
+            # 性能优化：预分配音频处理变量
+            chunk_size = 1024
+            level_log_interval = 1.0  # 改为每1秒记录一次
+            realtime_interval = 0.3   # 实时转写间隔
+            
+            # 预分配numpy数组避免重复分配
+            audio_buffer = np.zeros(chunk_size, dtype=np.int16)
+            
             while self.is_recording:
                 try:
-                    start_time = time.time()
-                    data = self.stream.read(1024, exception_on_overflow=False)
+                    loop_start = time.time()
+                    data = self.stream.read(chunk_size, exception_on_overflow=False)
                     
                     # 如果采样率不是16kHz，需要重采样到16kHz保存
                     if sample_rate != 16000:
@@ -344,19 +352,24 @@ class AudioRecorder:
                     with self.lock:
                         self.frames.append(data)
                     
-                    # 计算音频电平 - 改进的算法
+                    # 性能优化：改进音频电平计算
                     try:
-                        audio_array = np.frombuffer(data, dtype=np.int16)
+                        # 重用预分配的buffer避免重复内存分配
+                        data_len = len(data) // 2  # int16是2字节
+                        if data_len <= chunk_size:
+                            audio_buffer[:data_len] = np.frombuffer(data[:data_len*2], dtype=np.int16)
+                            audio_array = audio_buffer[:data_len]
+                        else:
+                            audio_array = np.frombuffer(data, dtype=np.int16)
                         
                         if len(audio_array) > 0:
-                            # 方法1: 计算RMS (root mean square)
-                            abs_data = np.abs(audio_array.astype(np.float64))  # 使用float64避免溢出
+                            # 使用更高效的电平计算
+                            abs_data = np.abs(audio_array, dtype=np.float32)  # 使用float32减少内存
                             mean_squared = np.mean(abs_data**2)
                             
                             if mean_squared > 0:
                                 rms = np.sqrt(mean_squared)
                                 # 归一化到0-100的范围
-                                # 针对不同的音频设备调整灵敏度
                                 max_value = 32768.0  # int16的最大值
                                 normalized_level = (rms / max_value) * 100
                                 
@@ -388,9 +401,9 @@ class AudioRecorder:
                         self.logger.warning(f"计算音频电平时出错: {e}")
                         self.current_audio_level = 0
                     
-                    # 每秒记录一次音频电平
-                    time_since_last_level_log += time.time() - start_time
-                    if time_since_last_level_log >= 1.0:  # 改为每1秒记录一次
+                    # 减少日志记录频率
+                    time_since_last_level_log += time.time() - loop_start
+                    if time_since_last_level_log >= level_log_interval:
                         self.logger.debug(f"当前音频电平: {self.current_audio_level}%, 数据长度: {len(data)}")
                         time_since_last_level_log = 0
                     
@@ -401,7 +414,7 @@ class AudioRecorder:
                         
                         # 更频繁地发送更新，每300毫秒一次
                         current_time = time.time()
-                        if current_time - last_realtime_update >= 0.3:  # 从0.5秒减少到0.3秒
+                        if current_time - last_realtime_update >= realtime_interval:
                             if realtime_frames:
                                 # 回调处理音频数据块，并传递当前音频电平
                                 self.realtime_callback(b''.join(realtime_frames), self.current_audio_level)
@@ -414,6 +427,7 @@ class AudioRecorder:
                                 
                                 # 记录调试信息
                                 self.logger.debug(f"发送实时音频数据块，音频电平: {self.current_audio_level}")
+                                
                 except IOError as e:
                     # 捕获常见的音频流错误并记录
                     if "Input overflowed" in str(e):

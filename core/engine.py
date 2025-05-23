@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 import time
 import wave
+import threading
 
 # 设置环境变量以避免OpenMP冲突
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -29,6 +30,11 @@ class WhisperEngine:
         self.buffer_size = 0  # 当前缓冲区大小(字节)
         self.available_models = self._detect_models()
         self.max_buffer_size = 1024 * 1024 * 10  # 限制缓冲区大小为10MB
+        
+        # 性能优化：添加模型加载状态跟踪
+        self._model_loading = False
+        self._model_load_lock = threading.Lock()
+        self._last_model_access = 0
         
     def _detect_models(self) -> List[Dict[str, Any]]:
         """检测已下载的模型，返回可用模型列表"""
@@ -197,39 +203,66 @@ class WhisperEngine:
             return False
             
     def ensure_model_loaded(self):
-        """确保模型已加载"""
+        """确保模型已加载 - 优化版本，线程安全且智能缓存"""
         if self.model is not None:
+            self._last_model_access = time.time()
             return
             
-        try:
-            # 获取设置
-            if not self.settings:
-                self.settings = self.get_optimal_settings()
+        # 使用锁确保线程安全的模型加载
+        with self._model_load_lock:
+            # 双重检查锁定模式
+            if self.model is not None:
+                self._last_model_access = time.time()
+                return
+                
+            if self._model_loading:
+                # 如果模型正在加载，等待加载完成
+                while self._model_loading and self.model is None:
+                    time.sleep(0.1)
+                if self.model is not None:
+                    self._last_model_access = time.time()
+                    return
+                    
+            self._model_loading = True
             
-            model_name = self.settings["model_name"]
-            compute_type = self.settings["compute_type"]
-            device = self.settings["device"]
-            cpu_threads = self.settings["threads"]
-            
-            # 设置环境变量
-            os.environ["OMP_NUM_THREADS"] = str(cpu_threads)
-            os.environ["MKL_NUM_THREADS"] = str(cpu_threads)
-            
-            # 加载模型
-            self.logger.info(f"Loading model {model_name} with {cpu_threads} threads...")
-            self.model = WhisperModel(
-                model_name,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=cpu_threads,
-                download_root=self.config.models_dir
-            )
-            self.model_name = model_name
-            self.initialized = True
-            
-        except Exception as e:
-            self.logger.error(f"加载模型时出错: {str(e)}")
-            raise
+            try:
+                # 获取设置
+                if not self.settings:
+                    self.settings = self.get_optimal_settings()
+                
+                model_name = self.settings["model_name"]
+                compute_type = self.settings["compute_type"]
+                device = self.settings["device"]
+                cpu_threads = self.settings["threads"]
+                
+                # 性能优化：设置环境变量
+                os.environ["OMP_NUM_THREADS"] = str(cpu_threads)
+                os.environ["MKL_NUM_THREADS"] = str(cpu_threads)
+                
+                self.logger.info(f"Loading model {model_name} with {cpu_threads} threads...")
+                start_time = time.time()
+                
+                # 加载模型
+                self.model = WhisperModel(
+                    model_name,
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=cpu_threads,
+                    download_root=self.config.models_dir
+                )
+                
+                load_time = time.time() - start_time
+                self.model_name = model_name
+                self.initialized = True
+                self._last_model_access = time.time()
+                
+                self.logger.info(f"Model {model_name} loaded successfully in {load_time:.2f}s")
+                
+            except Exception as e:
+                self.logger.error(f"加载模型时出错: {str(e)}")
+                raise
+            finally:
+                self._model_loading = False
                 
     def download_model(self, model_name="large-v3"):
         """检查模型是否存在，如果不存在则下载"""
