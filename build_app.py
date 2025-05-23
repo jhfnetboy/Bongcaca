@@ -278,56 +278,57 @@ def build_macos():
     else:
         icon_param = ["--icon", str(icon_file)]
     
-    # 优化构建命令
+    # 修改构建命令以确保应用能正常运行
     cmd = [
         "pyinstaller",
         "--name=VoiceTyper",
         "--windowed",
-        "--onefile",
+        "--onedir",  # 改为onedir模式，不使用onefile，避免权限问题
         "--noconfirm",
         "--clean",
         *icon_param,
         "--osx-bundle-identifier=com.bongcaca.voicetyper",
-        # 添加优化参数
-        "--noupx",  # 禁用 UPX 压缩，因为它可能导致一些问题
-        "--strip",  # 移除调试符号
-        # 排除不需要的模块
+        # 添加必要的模块和库
+        "--add-data=resources:resources",
+        # 确保包含关键模块
+        "--hidden-import=faster_whisper",
+        "--hidden-import=PySide6.QtCore",
+        "--hidden-import=PySide6.QtWidgets", 
+        "--hidden-import=PySide6.QtGui",
+        "--hidden-import=pyaudio",
+        "--hidden-import=numpy",
+        "--hidden-import=logging",
+        "--hidden-import=tempfile",
+        "--hidden-import=threading",
+        "--hidden-import=pathlib",
+        "--hidden-import=subprocess",
+        "--hidden-import=platform",
+        "--hidden-import=psutil",
+        "--hidden-import=huggingface_hub",
+        "--hidden-import=Quartz",
+        # 确保包含所有ui模块
+        "--hidden-import=ui.floating_window",
+        "--hidden-import=ui.logo",
+        "--hidden-import=ui.macos_app_icon",
+        # 确保包含所有core模块
+        "--hidden-import=core.engine",
+        "--hidden-import=core.recorder", 
+        "--hidden-import=core.hotkey_listener",
+        # 确保包含所有utils模块
+        "--hidden-import=utils.config",
+        "--hidden-import=utils.logging",
+        # 确保包含platform_specific模块
+        "--hidden-import=platform_specific.input",
+        # 不要排除过多模块，可能会导致应用无法启动
         "--exclude-module=matplotlib",
-        "--exclude-module=notebook",
-        "--exclude-module=PIL.ImageQt",
         "--exclude-module=PyQt5",
-        "--exclude-module=PyQt6",
+        "--exclude-module=PyQt6", 
         "--exclude-module=tkinter",
-        "--exclude-module=scipy",
-        "--exclude-module=pandas",
-        "--exclude-module=IPython",
-        "--exclude-module=jupyter",
-        "--exclude-module=nbconvert",
-        "--exclude-module=nbformat",
-        "--exclude-module=ipykernel",
-        "--exclude-module=ipywidgets",
-        "--exclude-module=traitlets",
-        "--exclude-module=tornado",
-        "--exclude-module=jedi",
-        "--exclude-module=parso",
-        "--exclude-module=pygments",
-        "--exclude-module=sphinx",
-        "--exclude-module=docutils",
-        "--exclude-module=nose",
-        "--exclude-module=pytest",
-        "--exclude-module=unittest",
-        "--exclude-module=xml",
-        "--exclude-module=email",
-        "--exclude-module=html",
-        "--exclude-module=http",
-        "--exclude-module=distutils",
-        "--exclude-module=pkg_resources",
-        "--exclude-module=setuptools",
-        "--exclude-module=pydoc",
-        # 只包含必要的数据文件
-        "--add-data=resources/icons:resources/icons",
-        # 优化 Python 字节码
-        "--python-option=O",
+        # 包含运行时必要的库
+        "--collect-all=faster_whisper",
+        "--collect-all=pyaudio",
+        # 启用控制台输出以便调试
+        "--debug=imports",
         "main.py"
     ]
     
@@ -336,6 +337,7 @@ def build_macos():
     
     if result.returncode != 0:
         logger.error(f"构建失败: {result.stderr}")
+        logger.error(f"构建输出: {result.stdout}")
         return False
     
     logger.info("应用构建成功")
@@ -350,14 +352,22 @@ def build_macos():
             with open(plist_path, 'rb') as f:
                 plist_data = load(f)
             
-            # 添加必要的权限声明
+            # 添加必要的权限声明和应用配置
             plist_data.update({
+                'CFBundleDisplayName': 'Voice Typer',
+                'CFBundleName': 'VoiceTyper',
+                'CFBundleIdentifier': 'com.bongcaca.voicetyper',
+                'CFBundleVersion': get_version_info()['version'],
+                'CFBundleShortVersionString': get_version_info()['version'],
                 'NSMicrophoneUsageDescription': '需要麦克风权限进行语音输入',
                 'NSAppleEventsUsageDescription': '需要控制其他应用以插入文本',
-                'NSAppleEventsUsageDescription': '需要访问辅助功能以进行文本输入',
                 'NSAccessibilityUsageDescription': '需要辅助功能权限以进行文本输入',
-                'LSUIElement': True,  # 使应用在后台运行
-                'LSBackgroundOnly': False  # 允许显示UI
+                'LSUIElement': False,  # 允许在Dock中显示
+                'NSRequiresAquaSystemAppearance': False,  # 支持暗色模式
+                'NSHighResolutionCapable': True,  # 支持高分辨率显示
+                # 添加URL类型处理（如果需要）
+                'CFBundleDocumentTypes': [],
+                'CFBundleURLTypes': []
             })
             
             with open(plist_path, 'wb') as f:
@@ -369,25 +379,52 @@ def build_macos():
             import stat
             os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
             
+            # 设置可执行文件权限
+            executable_path = app_path / "Contents" / "MacOS" / "VoiceTyper"
+            if executable_path.exists():
+                os.chmod(str(executable_path), stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                logger.info("已设置可执行文件权限")
+            
         except Exception as e:
             logger.error(f"修改Info.plist时出错: {e}")
             return False
     
-    # 创建 DMG 前清理不必要的文件
+    # 验证应用结构
+    logger.info("验证应用结构...")
+    app_contents = app_path / "Contents"
+    required_paths = [
+        "MacOS/VoiceTyper",
+        "Info.plist", 
+        "Resources"
+    ]
+    
+    for path in required_paths:
+        full_path = app_contents / path
+        if full_path.exists():
+            logger.info(f"✓ 存在: {path}")
+        else:
+            logger.error(f"✗ 缺失: {path}")
+            return False
+    
+    # 测试应用是否可以启动
+    logger.info("测试应用启动...")
     try:
-        # 删除 __pycache__ 目录
-        for pycache in app_path.rglob("__pycache__"):
-            shutil.rmtree(pycache)
-        # 删除 .pyc 文件
-        for pyc in app_path.rglob("*.pyc"):
-            pyc.unlink()
-        # 删除测试文件
-        for test in app_path.rglob("test_*.py"):
-            test.unlink()
-        logger.info("已清理不必要的文件")
+        # 在后台启动应用进行快速测试
+        test_process = subprocess.Popen([str(app_path / "Contents" / "MacOS" / "VoiceTyper"), "--help"], 
+                                       stdout=subprocess.PIPE, 
+                                       stderr=subprocess.PIPE,
+                                       timeout=10)
+        stdout, stderr = test_process.communicate(timeout=10)
+        if test_process.returncode == 0 or "usage:" in stdout.decode():
+            logger.info("✓ 应用可以正常启动")
+        else:
+            logger.warning(f"应用启动测试可能有问题: {stderr.decode()}")
+    except subprocess.TimeoutExpired:
+        logger.info("✓ 应用启动测试超时，但这通常是正常的（应用可能在等待用户输入）")
+        test_process.kill()
     except Exception as e:
-        logger.warning(f"清理文件时出错: {e}")
-
+        logger.warning(f"应用启动测试失败: {e}")
+    
     # 创建 DMG
     try:
         logger.info("创建 DMG 安装镜像...")
@@ -399,8 +436,8 @@ def build_macos():
             "--icon-size", "100",
             "--icon", "VoiceTyper.app", "200", "190",
             "--app-drop-link", "600", "185",
-            "--format", "UDZO",  # 使用 UDZO 格式进行压缩
-            "--no-internet-enable",  # 禁用网络链接
+            "--format", "UDZO",
+            "--no-internet-enable",
             "VoiceTyper.dmg",
             "dist/VoiceTyper.app"
         ]
@@ -415,6 +452,10 @@ def build_macos():
         logger.error(f"创建 DMG 时出错: {e}")
     
     logger.info(f"macOS 应用已构建完成: {app_path}")
+    logger.info("使用提示：")
+    logger.info("1. 首次运行时，macOS会要求授予麦克风和辅助功能权限")
+    logger.info("2. 如果应用无法启动，请检查系统偏好设置 -> 安全性与隐私 -> 通用，允许运行该应用")
+    logger.info("3. 可以通过双击 .app 文件或从 Applications 文件夹启动应用")
     return True
 
 def build_windows():

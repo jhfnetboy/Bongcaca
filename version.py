@@ -1,4 +1,4 @@
-VERSION = "0.3.2"  # 修复转写参数错误
+VERSION = "0.3.3"  # UI响应性和模型选择修复
 
 def get_version():
-    return "0.3.2" 
+    return "0.3.3" 

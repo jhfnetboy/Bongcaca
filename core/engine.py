@@ -86,8 +86,12 @@ class WhisperEngine:
         else:  # base, tiny or other
             return min(cpu_count, 2)  # 使用最多2个线程
         
-    def get_optimal_settings(self) -> Dict[str, Any]:
-        """根据系统资源情况，优化配置参数"""
+    def get_optimal_settings(self, user_selected_model=None) -> Dict[str, Any]:
+        """根据系统资源情况或用户选择，优化配置参数
+        
+        Args:
+            user_selected_model: 用户指定的模型名称，如果为None则自动选择
+        """
         # 检查系统内存和CPU
         system_ram = psutil.virtual_memory().total / (1024 ** 3)  # GB
         cpu_count = psutil.cpu_count(logical=False)
@@ -95,44 +99,38 @@ class WhisperEngine:
             cpu_count = psutil.cpu_count(logical=True)
             if cpu_count is None:
                 cpu_count = 2
+        
+        # 如果用户指定了模型，优先使用用户选择的模型
+        if user_selected_model:
+            # 检查用户选择的模型是否已下载
+            for model_info in self.available_models:
+                if model_info["name"] == user_selected_model:
+                    self.logger.info(f"Using user-selected model: {user_selected_model}")
+                    return {
+                        "model_name": user_selected_model,
+                        "device": "cpu",
+                        "compute_type": "int8",
+                        "beam_size": 5,
+                        "threads": model_info["threads"]
+                    }
+            
+            # 如果用户选择的模型未下载，记录警告但继续使用自动选择
+            self.logger.warning(f"User-selected model {user_selected_model} not found, falling back to auto selection")
                 
-        # 首先检查是否有可用的已下载模型
+        # 自动选择逻辑：首先检查是否有可用的已下载模型
         if self.available_models:
-            # 优先使用large-v3
-            for model_info in self.available_models:
-                if model_info["name"] == "large-v3":
-                    self.logger.info(f"Using pre-downloaded large-v3 model")
-                    return {
-                        "model_name": "large-v3",
-                        "device": "cpu",
-                        "compute_type": "int8",
-                        "beam_size": 5,
-                        "threads": model_info["threads"]
-                    }
-            
-            # 如果没有large-v3，但有medium
-            for model_info in self.available_models:
-                if model_info["name"] == "medium":
-                    self.logger.info(f"Using pre-downloaded medium model")
-                    return {
-                        "model_name": "medium",
-                        "device": "cpu",
-                        "compute_type": "int8",
-                        "beam_size": 5,
-                        "threads": model_info["threads"]
-                    }
-            
-            # 如果没有medium，但有small
-            for model_info in self.available_models:
-                if model_info["name"] == "small":
-                    self.logger.info(f"Using pre-downloaded small model")
-                    return {
-                        "model_name": "small",
-                        "device": "cpu",
-                        "compute_type": "int8",
-                        "beam_size": 5,
-                        "threads": model_info["threads"]
-                    }
+            # 按优先级顺序选择：large-v3 > medium > small > 其他
+            for preferred_model in ["large-v3", "medium", "small"]:
+                for model_info in self.available_models:
+                    if model_info["name"] == preferred_model:
+                        self.logger.info(f"Using pre-downloaded {preferred_model} model")
+                        return {
+                            "model_name": preferred_model,
+                            "device": "cpu",
+                            "compute_type": "int8",
+                            "beam_size": 5,
+                            "threads": model_info["threads"]
+                        }
             
             # 使用任何已下载的模型
             model_info = self.available_models[0]
@@ -183,9 +181,6 @@ class WhisperEngine:
         # 确定是否使用GPU
         device = "cpu"  # 默认使用CPU
         
-        # 如果有足够内存的NVIDIA GPU，可以考虑使用cuda
-        # TODO: 检测GPU并自动配置
-        
         return {
             "model_name": model_name,
             "device": device,
@@ -202,8 +197,19 @@ class WhisperEngine:
         except:
             return False
             
-    def ensure_model_loaded(self):
-        """确保模型已加载 - 优化版本，线程安全且智能缓存"""
+    def ensure_model_loaded(self, user_selected_model=None):
+        """确保模型已加载 - 优化版本，线程安全且智能缓存
+        
+        Args:
+            user_selected_model: 用户指定的模型名称
+        """
+        # 如果指定了用户模型且与当前模型不同，则需要重新加载
+        if user_selected_model and self.model_name != user_selected_model:
+            self.logger.info(f"User requested model switch from {self.model_name} to {user_selected_model}")
+            self.model = None
+            self.model_name = None
+            self.initialized = False
+            
         if self.model is not None:
             self._last_model_access = time.time()
             return
@@ -226,9 +232,8 @@ class WhisperEngine:
             self._model_loading = True
             
             try:
-                # 获取设置
-                if not self.settings:
-                    self.settings = self.get_optimal_settings()
+                # 获取设置，传入用户选择的模型
+                self.settings = self.get_optimal_settings(user_selected_model=user_selected_model)
                 
                 model_name = self.settings["model_name"]
                 compute_type = self.settings["compute_type"]
@@ -474,3 +479,15 @@ class WhisperEngine:
         except Exception as e:
             self.logger.error(f"实时转写过程中出错: {str(e)}")
             return None 
+
+    def set_user_model(self, model_name):
+        """设置用户指定的模型"""
+        self.user_selected_model = model_name
+        # 重新计算设置
+        self.settings = self.get_optimal_settings(user_selected_model=model_name)
+        # 如果模型已加载且不是用户选择的模型，则清除当前模型
+        if self.model and self.model_name != model_name:
+            self.logger.info(f"Switching from {self.model_name} to {model_name}, clearing current model")
+            self.model = None
+            self.model_name = None
+            self.initialized = False 
