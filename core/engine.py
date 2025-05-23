@@ -318,18 +318,30 @@ class WhisperEngine:
             return None
     
     def transcribe(self, audio_file: str, language="zh", initial_prompt=None, target_language=None) -> str:
-        """使用批量模式转写音频文件，返回完整文本"""
+        """使用批量模式转写音频文件，返回完整文本 - 性能优化版本"""
         try:
             self.ensure_model_loaded()
             
+            # 性能优化：检查文件大小，调整参数
+            file_size = os.path.getsize(audio_file)
+            is_large_file = file_size > 1024 * 1024 * 5  # 5MB以上的文件
+            
             try:
-                self.logger.info(f"Transcribing audio file: {audio_file}, language: {language}, target_language: {target_language}")
+                self.logger.info(f"Transcribing audio file: {audio_file} ({file_size/1024/1024:.2f}MB), language: {language}, target_language: {target_language}")
                 
-                # 设置转写参数
-                beam_size = 1  # 降低beam_size减少内存使用
+                # 根据文件大小动态调整参数
+                if is_large_file:
+                    beam_size = 3  # 大文件使用更小的beam_size
+                    batch_size = 8  # 增加批处理大小
+                else:
+                    beam_size = 1  # 小文件保持最小beam_size
+                    batch_size = 4
                 
                 # 如果需要翻译，使用task参数
                 task = "translate" if target_language and target_language != language else "transcribe"
+                
+                # 性能优化：记录转写开始时间
+                transcribe_start = time.time()
                 
                 # 使用更宽松的VAD参数，特别适合虚拟音频设备和低音量输入
                 segments, info = self.model.transcribe(
@@ -337,6 +349,7 @@ class WhisperEngine:
                     language=language if language != "auto" else None,
                     initial_prompt=initial_prompt,
                     beam_size=beam_size,
+                    batch_size=batch_size,  # 新增批处理大小
                     word_timestamps=False,  # 禁用词级时间戳以减少内存使用
                     condition_on_previous_text=False,
                     temperature=0.0,
@@ -351,19 +364,10 @@ class WhisperEngine:
                     task=task  # 使用task参数替代translate参数
                 )
                 
-                # 立即处理segments
-                transcript_parts = []
-                for segment in segments:
-                    if segment.text:
-                        transcript_parts.append(segment.text)
+                # 性能优化：使用生成器和列表推导式加速文本处理
+                transcript = " ".join(segment.text for segment in segments if segment.text)
                 
-                # 合并文本
-                transcript = " ".join(transcript_parts)
-                del transcript_parts
-                
-                # 显式删除segments和info
-                del segments
-                del info
+                transcribe_time = time.time() - transcribe_start
                 
                 # 清理文本
                 transcript = transcript.strip()
@@ -379,7 +383,7 @@ class WhisperEngine:
                     self.logger.warning("转写结果包含广告内容")
                     return "请说话..."
                 
-                self.logger.info(f"转写成功，结果长度: {len(transcript)}")
+                self.logger.info(f"转写成功，结果长度: {len(transcript)}, 耗时: {transcribe_time:.2f}s")
                 return transcript
                 
             except Exception as e:
@@ -412,19 +416,30 @@ class WhisperEngine:
         self.buffer_size = 0
         
     def get_realtime_transcription(self, language="zh", target_language=None) -> Optional[str]:
-        """实时转写当前缓冲区中的音频数据"""
+        """实时转写当前缓冲区中的音频数据 - 性能优化版本"""
         if not self.buffer or self.buffer_size == 0:
             return None
             
         try:
             self.ensure_model_loaded()
             
-            # 如果缓冲区太大，清理旧数据
+            # 性能优化：更智能的缓冲区管理
             if self.buffer_size > self.max_buffer_size:
                 self.logger.warning("缓冲区超过最大大小限制，清理旧数据")
-                while self.buffer_size > self.max_buffer_size:
-                    old_chunk = self.buffer.pop(0)
-                    self.buffer_size -= len(old_chunk)
+                # 保留最后一半的数据，而不是逐个删除
+                total_chunks = len(self.buffer)
+                keep_chunks = total_chunks // 2
+                removed_chunks = self.buffer[:total_chunks - keep_chunks]
+                self.buffer = self.buffer[total_chunks - keep_chunks:]
+                
+                # 重新计算缓冲区大小
+                self.buffer_size = sum(len(chunk) for chunk in self.buffer)
+                self.logger.debug(f"清理了 {len(removed_chunks)} 个音频块，当前缓冲区大小: {self.buffer_size}")
+            
+            # 性能优化：如果缓冲区数据太少，跳过转写
+            min_buffer_size = 1024 * 16  # 16KB最小数据量
+            if self.buffer_size < min_buffer_size:
+                return None
             
             # 将缓冲区数据保存为临时文件
             temp_file_path = None
@@ -433,13 +448,14 @@ class WhisperEngine:
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
                     temp_file_path = temp_file.name
                     
-                    # 创建WAV文件
+                    # 性能优化：使用更高效的WAV文件写入
                     with wave.open(temp_file_path, 'wb') as wf:
                         wf.setnchannels(1)
                         wf.setsampwidth(2)
                         wf.setframerate(16000)
-                        for chunk in self.buffer:
-                            wf.writeframes(chunk)
+                        # 一次性写入所有数据，而不是逐块写入
+                        combined_data = b''.join(self.buffer)
+                        wf.writeframes(combined_data)
                 
                 # 转写临时文件
                 transcript = self.transcribe(

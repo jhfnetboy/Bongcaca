@@ -730,8 +730,17 @@ class FloatingWindow(QMainWindow):
             self.logger.error(f"插入文本过程中出错: {e}")
         
     def update_audio_level(self, level):
-        """更新音频电平"""
+        """更新音量显示 - 性能优化版本"""
+        # 性能优化：减少不必要的更新，只在电平变化明显时更新
+        if hasattr(self, '_last_ui_level'):
+            level_diff = abs(level - self._last_ui_level)
+            if level_diff < 2:  # 电平变化小于2%时跳过更新
+                return
+        
+        self._last_ui_level = level
         self.visualizer.update_level(level)
+        # 移除过于频繁的debug日志
+        # self.logger.debug(f"Audio level: {level}%")
         
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -758,11 +767,6 @@ class FloatingWindow(QMainWindow):
         self.status_label.setText(f"Result: {text}")
         self.logger.info(f"Recognition result: {text}")
         
-    def update_audio_level(self, level):
-        """更新音量显示"""
-        self.visualizer.update_level(level)
-        self.logger.debug(f"Audio level: {level}%")
-
     def get_selected_device_id(self):
         """获取当前选择的设备ID"""
         if self.device_combo.count() == 0:
