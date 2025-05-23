@@ -1,4 +1,4 @@
-VERSION = "0.23.64"  # 更新版本号
+VERSION = "0.3.0"  # 阶段版本 - 录音和VAD优化完成
 
 def get_version():
-    return "0.23.64" 
+    return "0.3.0" 
