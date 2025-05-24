@@ -3,6 +3,7 @@
 """
 Voice Typer 应用打包脚本
 支持 macOS 和 Windows 平台
+支持多架构构建（Apple Silicon 和 Intel）
 """
 
 import os
@@ -13,6 +14,7 @@ import logging
 from pathlib import Path
 import argparse
 import time
+import platform
 from datetime import datetime
 
 # 初始化 Qt 应用程序
@@ -25,14 +27,38 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("build_app")
 
 # 版本信息
-VERSION = "0.23.43"
+VERSION = "0.3.18"
 BUILD_DATE = datetime.now().strftime("%Y-%m-%d")
 
+def get_architecture():
+    """获取当前系统架构"""
+    machine = platform.machine().lower()
+    if machine in ['arm64', 'aarch64']:
+        return 'arm64'
+    elif machine in ['x86_64', 'amd64']:
+        return 'x86_64'
+    else:
+        return machine
+
+def get_architecture_display_name(arch):
+    """获取架构的显示名称"""
+    arch_names = {
+        'arm64': 'Apple Silicon',
+        'x86_64': 'Intel'
+    }
+    return arch_names.get(arch, arch)
+
 def get_version_info():
-    """获取版本信息"""
+    """获取版本信息，包含架构信息"""
+    arch = get_architecture()
+    arch_display = get_architecture_display_name(arch)
+    
     return {
         "version": VERSION,
         "build_date": BUILD_DATE,
+        "architecture": arch,
+        "architecture_display": arch_display,
+        "version_with_arch": f"{VERSION}-{arch}",
         "file_version": tuple(map(int, VERSION.split("."))) + (0,),
         "product_version": tuple(map(int, VERSION.split("."))) + (0,)
     }
@@ -461,19 +487,24 @@ def build_macos():
     
     # 创建 DMG
     try:
-        logger.info("创建 DMG 安装镜像...")
+        version_info = get_version_info()
+        arch_display = version_info['architecture_display']
+        dmg_name = f"VoiceTyper-{version_info['version']}-{version_info['architecture']}.dmg"
+        volume_name = f"VoiceTyper {arch_display}"
+        
+        logger.info(f"创建 {arch_display} 架构的 DMG 安装镜像: {dmg_name}")
         
         # 确保没有同名的DMG文件被挂载或存在
-        if os.path.exists("VoiceTyper.dmg"):
-            logger.info("删除现有的DMG文件...")
-            os.remove("VoiceTyper.dmg")
+        if os.path.exists(dmg_name):
+            logger.info(f"删除现有的DMG文件: {dmg_name}")
+            os.remove(dmg_name)
         
         # 尝试卸载可能挂载的DMG
         try:
-            unmount_result = subprocess.run(["hdiutil", "detach", "/Volumes/VoiceTyper"], 
+            unmount_result = subprocess.run(["hdiutil", "detach", f"/Volumes/{volume_name}"], 
                                           capture_output=True, text=True, timeout=10)
             if unmount_result.returncode == 0:
-                logger.info("卸载了现有的VoiceTyper镜像")
+                logger.info(f"卸载了现有的{volume_name}镜像")
         except:
             pass  # 忽略卸载错误，可能本来就没有挂载
         
@@ -483,7 +514,7 @@ def build_macos():
         
         dmg_cmd = [
             "create-dmg",
-            "--volname", "VoiceTyper",
+            "--volname", volume_name,
             "--window-pos", "200", "120",
             "--window-size", "800", "450",
             "--icon-size", "100",
@@ -491,7 +522,7 @@ def build_macos():
             "--app-drop-link", "600", "185",
             "--format", "UDZO",
             "--no-internet-enable",
-            "VoiceTyper.dmg",
+            dmg_name,
             "dist/VoiceTyper.app"
         ]
         
@@ -503,19 +534,28 @@ def build_macos():
             logger.info("尝试使用hdiutil创建DMG...")
             try:
                 simple_dmg_cmd = [
-                    "hdiutil", "create", "-volname", "VoiceTyper",
+                    "hdiutil", "create", "-volname", volume_name,
                     "-srcfolder", "dist/VoiceTyper.app",
-                    "-ov", "-format", "UDZO", "VoiceTyper.dmg"
+                    "-ov", "-format", "UDZO", dmg_name
                 ]
                 simple_result = subprocess.run(simple_dmg_cmd, capture_output=True, text=True)
                 if simple_result.returncode == 0:
-                    logger.info("使用hdiutil成功创建DMG: VoiceTyper.dmg")
+                    logger.info(f"使用hdiutil成功创建DMG: {dmg_name}")
                 else:
                     logger.error(f"hdiutil创建DMG也失败: {simple_result.stderr}")
             except Exception as e:
                 logger.error(f"备用DMG创建方法失败: {e}")
         else:
-            logger.info("DMG 安装镜像已创建: VoiceTyper.dmg")
+            logger.info(f"DMG 安装镜像已创建: {dmg_name}")
+            
+        # 显示构建信息
+        logger.info("=" * 60)
+        logger.info(f"🎉 构建完成！")
+        logger.info(f"架构: {arch_display} ({version_info['architecture']})")
+        logger.info(f"版本: {version_info['version']}")
+        logger.info(f"DMG文件: {dmg_name}")
+        logger.info("=" * 60)
+        
     except Exception as e:
         logger.error(f"创建 DMG 时出错: {e}")
     
@@ -617,8 +657,15 @@ def main():
             logger.error(f"不支持的平台: {sys.platform}")
             return 1
     
-    logger.info(f"开始构建 Voice Typer 应用，目标平台: {platform}")
-    logger.info(f"版本: {VERSION}，构建日期: {BUILD_DATE}")
+    # 显示构建信息
+    version_info = get_version_info()
+    logger.info("=" * 60)
+    logger.info(f"🚀 开始构建 Voice Typer 应用")
+    logger.info(f"目标平台: {platform}")
+    logger.info(f"版本: {VERSION}")
+    logger.info(f"构建日期: {BUILD_DATE}")
+    logger.info(f"架构: {version_info['architecture_display']} ({version_info['architecture']})")
+    logger.info("=" * 60)
     
     # 检查依赖
     if not args.skip_deps_check and not check_requirements():

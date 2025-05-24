@@ -1,4 +1,4 @@
-VERSION = "0.3.17"  # 修复空录音转写和构建错误，完善用户体验
+VERSION = "0.3.18"  # 支持多架构构建，优化发布流程
 
 def get_version():
-    return "0.3.17" 
+    return "0.3.18" 
