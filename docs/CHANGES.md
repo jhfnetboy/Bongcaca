@@ -457,3 +457,10 @@ https://huggingface.co/Systran/faster-distil-whisper-large-v3
 - 改进：转写完成处理逻辑，统一使用update_result方法更新UI
 - 改进：文档结构优化，将deploy.md重命名为DEPLOY.md
 
+## 2025-05-24 (0.3.10)
+- 新增：macOS麦克风权限申请功能，首次运行时自动检查和申请权限
+- 性能优化：根据系统内存动态调整模型num_workers参数（16GB+使用4个，8-16GB使用2个，<8GB使用1个）
+- 性能优化：动态调整转写参数，高内存系统使用更精细参数，低内存系统使用更快速参数
+- 性能优化：根据系统性能调整beam_size，减少转写时间
+- 新增：utils/permissions.py模块，专门处理macOS权限申请
+

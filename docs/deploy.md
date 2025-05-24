@@ -75,10 +75,22 @@ python main.py  # Should start the application GUI
 
 ## Version History
 
+- v0.3.10: 添加麦克风权限申请和性能优化
 - v0.3.8: 修复缺失方法和脚本运行问题
 - v0.3.7: 修复UI更新和音频电平显示问题
 - v0.3.6: 修复录音逻辑和参数传递错误  
 - v0.3.5: 修复虚拟环境和依赖配置
+
+## System Requirements
+
+### Performance Requirements
+- 推荐内存：16GB+ (支持更多并发处理)
+- 最低内存：8GB (基本功能正常)
+- CPU：多核处理器 (支持并行计算)
+
+### macOS Requirements
+- macOS 10.14+ 
+- 麦克风权限 (首次运行时会自动申请)
 
 ## Troubleshooting
 

@@ -1,4 +1,4 @@
-VERSION = "0.3.8"  # 修复缺失方法和脚本运行问题
+VERSION = "0.3.10"  # 添加麦克风权限申请和性能优化
 
 def get_version():
-    return "0.3.8" 
+    return "0.3.10" 

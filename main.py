@@ -504,6 +504,22 @@ def main():
     logger.info(f"操作系统: {platform.system()} {platform.release()}")
     logger.info(f"Python版本: {platform.python_version()}")
     
+    # macOS麦克风权限检查
+    if platform.system() == "Darwin":
+        from utils.permissions import check_microphone_permission, request_microphone_permission, show_permission_dialog
+        
+        logger.info("检查麦克风权限...")
+        if not check_microphone_permission():
+            logger.warning("需要麦克风权限")
+            show_permission_dialog()
+            
+            # 尝试请求权限
+            if not request_microphone_permission():
+                logger.error("麦克风权限被拒绝，程序可能无法正常工作")
+                print("警告：麦克风权限被拒绝，请在系统设置中手动开启权限后重新运行程序")
+            else:
+                logger.info("麦克风权限已获得")
+    
     # 检查配置
     logger.debug(f"配置目录: {config._get_config_dir()}")
     logger.debug(f"模型目录: {config.models_dir}")

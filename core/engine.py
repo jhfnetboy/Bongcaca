@@ -247,14 +247,31 @@ class WhisperEngine:
                 self.logger.info(f"Loading model {model_name} with {cpu_threads} threads...")
                 start_time = time.time()
                 
+                # 性能优化：根据内存大小调整num_workers
+                import psutil
+                memory_gb = psutil.virtual_memory().total / (1024**3)
+                
+                if memory_gb >= 16:
+                    # 16GB+内存：使用更多workers提高并发处理
+                    num_workers = min(4, cpu_threads)
+                elif memory_gb >= 8:
+                    # 8-16GB内存：中等配置
+                    num_workers = min(2, cpu_threads)
+                else:
+                    # <8GB内存：保守配置
+                    num_workers = 1
+                
                 # 加载模型
                 self.model = WhisperModel(
                     model_name,
                     device=device,
                     compute_type=compute_type,
                     cpu_threads=cpu_threads,
+                    num_workers=num_workers,
                     download_root=self.config.models_dir
                 )
+                
+                self.logger.info(f"模型配置 - 设备: {device}, 计算类型: {compute_type}, CPU线程: {cpu_threads}, 工作进程: {num_workers}")
                 
                 load_time = time.time() - start_time
                 self.model_name = model_name
@@ -334,11 +351,14 @@ class WhisperEngine:
             try:
                 self.logger.info(f"Transcribing audio file: {audio_file} ({file_size/1024/1024:.2f}MB), language: {language}, target_language: {target_language}")
                 
-                # 根据文件大小动态调整参数
+                # 性能优化：根据文件大小和系统性能动态调整参数
+                import psutil
+                memory_gb = psutil.virtual_memory().total / (1024**3)
+                
                 if is_large_file:
-                    beam_size = 3  # 大文件使用更小的beam_size
+                    beam_size = 2 if memory_gb >= 16 else 1  # 大文件使用更小的beam_size
                 else:
-                    beam_size = 1  # 小文件保持最小beam_size
+                    beam_size = 1  # 小文件使用最小beam_size以提升速度
                 
                 # 如果需要翻译，使用task参数
                 task = "translate" if target_language and target_language != language else "transcribe"
@@ -346,7 +366,24 @@ class WhisperEngine:
                 # 性能优化：记录转写开始时间
                 transcribe_start = time.time()
                 
-                # 使用更宽松的VAD参数，特别适合虚拟音频设备和低音量输入
+                # 性能优化：根据系统性能调整VAD参数和其他设置
+                if memory_gb >= 16:
+                    # 高内存系统：使用更精细的参数
+                    vad_params = {
+                        "min_silence_duration_ms": 150,
+                        "speech_pad_ms": 100,
+                        "threshold": 0.3
+                    }
+                    temperature = 0.0
+                else:
+                    # 低内存系统：使用更激进的参数提升速度
+                    vad_params = {
+                        "min_silence_duration_ms": 200,
+                        "speech_pad_ms": 50,
+                        "threshold": 0.4
+                    }
+                    temperature = 0.2  # 稍高的temperature可以提升速度
+                
                 segments, info = self.model.transcribe(
                     audio_file,
                     language=language if language != "auto" else None,
@@ -354,15 +391,11 @@ class WhisperEngine:
                     beam_size=beam_size,
                     word_timestamps=False,  # 禁用词级时间戳以减少内存使用
                     condition_on_previous_text=False,
-                    temperature=0.0,
+                    temperature=temperature,
                     compression_ratio_threshold=2.4,
-                    no_speech_threshold=0.3,  # 降低无语音阈值，从0.6降低到0.3
+                    no_speech_threshold=0.3,
                     vad_filter=True,
-                    vad_parameters={
-                        "min_silence_duration_ms": 200,  # 减少最小静音时长，从500ms降低到200ms
-                        "speech_pad_ms": 100,            # 语音填充，在检测到的语音前后添加填充
-                        "threshold": 0.3                  # 降低VAD检测阈值，从默认0.5降低到0.3
-                    },
+                    vad_parameters=vad_params,
                     task=task  # 使用task参数替代translate参数
                 )
                 
