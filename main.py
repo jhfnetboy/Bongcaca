@@ -504,6 +504,11 @@ def main():
     logger.info(f"操作系统: {platform.system()} {platform.release()}")
     logger.info(f"Python版本: {platform.python_version()}")
     
+    # 检查是否通过launcher启动
+    launched_by_launcher = os.environ.get('VOICETYPER_LAUNCHED_BY_LAUNCHER', 'false').lower() == 'true'
+    if launched_by_launcher:
+        logger.info("✅ 通过launcher启动，权限应已检查")
+    
     # macOS麦克风权限检查 - 增强版本
     if platform.system() == "Darwin":
         from utils.permissions import (

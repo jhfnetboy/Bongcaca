@@ -152,9 +152,17 @@ def create_info_plist(resources_dir):
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>需要麦克风权限进行语音输入</string>
+    <string>VoiceTyper需要访问您的麦克风来进行语音识别和转写</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>需要控制其他应用以插入文本</string>
+    <string>VoiceTyper需要控制其他应用以自动输入转写的文本</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>VoiceTyper需要辅助功能权限以便在其他应用中输入文本</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
 </dict>
 </plist>''')
     logger.info(f"macOS Info.plist 模板已生成: {plist_file}")
@@ -329,7 +337,9 @@ def build_macos():
         "--collect-all=pyaudio",
         # 启用控制台输出以便调试
         "--debug=imports",
-        "main.py"
+        # 添加权限和启动配置
+        "--runtime-tmpdir", "/tmp",
+        "launcher.py"
     ]
     
     logger.info(f"执行命令: {' '.join(cmd)}")
@@ -384,6 +394,29 @@ def build_macos():
             if executable_path.exists():
                 os.chmod(str(executable_path), stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
                 logger.info("已设置可执行文件权限")
+                
+                # 尝试代码签名（如果有开发者证书）
+                try:
+                    entitlements_path = Path("VoiceTyper.entitlements")
+                    if entitlements_path.exists():
+                        sign_cmd = [
+                            "codesign",
+                            "--force", 
+                            "--sign", "-",  # 使用adhoc签名
+                            "--entitlements", str(entitlements_path),
+                            "--deep",
+                            str(app_path)
+                        ]
+                        
+                        sign_result = subprocess.run(sign_cmd, capture_output=True, text=True)
+                        if sign_result.returncode == 0:
+                            logger.info("✅ 应用代码签名成功")
+                        else:
+                            logger.warning(f"⚠️  代码签名失败，但应用仍可使用: {sign_result.stderr}")
+                    else:
+                        logger.warning("⚠️  未找到entitlements文件，跳过代码签名")
+                except Exception as e:
+                    logger.warning(f"⚠️  代码签名过程出错，但应用仍可使用: {e}")
             
         except Exception as e:
             logger.error(f"修改Info.plist时出错: {e}")
