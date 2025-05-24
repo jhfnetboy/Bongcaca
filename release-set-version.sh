@@ -1,1 +1,3 @@
-gh release create v0.23.39 --title "Voice Typer 0.23.39" --notes "更新日志请见CHANGES.md"
+
+gh release create v0.3.17-arm64 --title "Voice Typer 0.3.17 for arm64" --notes "录音优化了一些"
+

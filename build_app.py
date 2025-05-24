@@ -3,6 +3,7 @@
 """
 Voice Typer 应用打包脚本
 支持 macOS 和 Windows 平台
+支持多架构构建（Apple Silicon 和 Intel）
 """
 
 import os
@@ -13,6 +14,7 @@ import logging
 from pathlib import Path
 import argparse
 import time
+import platform
 from datetime import datetime
 
 # 初始化 Qt 应用程序
@@ -25,14 +27,38 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("build_app")
 
 # 版本信息
-VERSION = "0.23.43"
+VERSION = "0.3.18"
 BUILD_DATE = datetime.now().strftime("%Y-%m-%d")
 
+def get_architecture():
+    """获取当前系统架构"""
+    machine = platform.machine().lower()
+    if machine in ['arm64', 'aarch64']:
+        return 'arm64'
+    elif machine in ['x86_64', 'amd64']:
+        return 'x86_64'
+    else:
+        return machine
+
+def get_architecture_display_name(arch):
+    """获取架构的显示名称"""
+    arch_names = {
+        'arm64': 'Apple Silicon',
+        'x86_64': 'Intel'
+    }
+    return arch_names.get(arch, arch)
+
 def get_version_info():
-    """获取版本信息"""
+    """获取版本信息，包含架构信息"""
+    arch = get_architecture()
+    arch_display = get_architecture_display_name(arch)
+    
     return {
         "version": VERSION,
         "build_date": BUILD_DATE,
+        "architecture": arch,
+        "architecture_display": arch_display,
+        "version_with_arch": f"{VERSION}-{arch}",
         "file_version": tuple(map(int, VERSION.split("."))) + (0,),
         "product_version": tuple(map(int, VERSION.split("."))) + (0,)
     }
@@ -152,9 +178,17 @@ def create_info_plist(resources_dir):
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>需要麦克风权限进行语音输入</string>
+    <string>VoiceTyper需要访问您的麦克风来进行语音识别和转写</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>需要控制其他应用以插入文本</string>
+    <string>VoiceTyper需要控制其他应用以自动输入转写的文本</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>VoiceTyper需要辅助功能权限以便在其他应用中输入文本</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
 </dict>
 </plist>''')
     logger.info(f"macOS Info.plist 模板已生成: {plist_file}")
@@ -278,57 +312,60 @@ def build_macos():
     else:
         icon_param = ["--icon", str(icon_file)]
     
-    # 优化构建命令
+    # 修改构建命令以确保应用能正常运行
     cmd = [
         "pyinstaller",
         "--name=VoiceTyper",
         "--windowed",
-        "--onefile",
+        "--onedir",  # 改为onedir模式，不使用onefile，避免权限问题
         "--noconfirm",
         "--clean",
         *icon_param,
         "--osx-bundle-identifier=com.bongcaca.voicetyper",
-        # 添加优化参数
-        "--noupx",  # 禁用 UPX 压缩，因为它可能导致一些问题
-        "--strip",  # 移除调试符号
-        # 排除不需要的模块
+        # 添加必要的模块和库
+        "--add-data=resources:resources",
+        # 确保包含关键模块
+        "--hidden-import=faster_whisper",
+        "--hidden-import=PySide6.QtCore",
+        "--hidden-import=PySide6.QtWidgets", 
+        "--hidden-import=PySide6.QtGui",
+        "--hidden-import=pyaudio",
+        "--hidden-import=numpy",
+        "--hidden-import=logging",
+        "--hidden-import=tempfile",
+        "--hidden-import=threading",
+        "--hidden-import=pathlib",
+        "--hidden-import=subprocess",
+        "--hidden-import=platform",
+        "--hidden-import=psutil",
+        "--hidden-import=huggingface_hub",
+        "--hidden-import=Quartz",
+        # 确保包含所有ui模块
+        "--hidden-import=ui.floating_window",
+        "--hidden-import=ui.logo",
+        "--hidden-import=ui.macos_app_icon",
+        # 确保包含所有core模块
+        "--hidden-import=core.engine",
+        "--hidden-import=core.recorder", 
+        "--hidden-import=core.hotkey_listener",
+        # 确保包含所有utils模块
+        "--hidden-import=utils.config",
+        "--hidden-import=utils.logging",
+        # 确保包含platform_specific模块
+        "--hidden-import=platform_specific.input",
+        # 不要排除过多模块，可能会导致应用无法启动
         "--exclude-module=matplotlib",
-        "--exclude-module=notebook",
-        "--exclude-module=PIL.ImageQt",
         "--exclude-module=PyQt5",
-        "--exclude-module=PyQt6",
+        "--exclude-module=PyQt6", 
         "--exclude-module=tkinter",
-        "--exclude-module=scipy",
-        "--exclude-module=pandas",
-        "--exclude-module=IPython",
-        "--exclude-module=jupyter",
-        "--exclude-module=nbconvert",
-        "--exclude-module=nbformat",
-        "--exclude-module=ipykernel",
-        "--exclude-module=ipywidgets",
-        "--exclude-module=traitlets",
-        "--exclude-module=tornado",
-        "--exclude-module=jedi",
-        "--exclude-module=parso",
-        "--exclude-module=pygments",
-        "--exclude-module=sphinx",
-        "--exclude-module=docutils",
-        "--exclude-module=nose",
-        "--exclude-module=pytest",
-        "--exclude-module=unittest",
-        "--exclude-module=xml",
-        "--exclude-module=email",
-        "--exclude-module=html",
-        "--exclude-module=http",
-        "--exclude-module=distutils",
-        "--exclude-module=pkg_resources",
-        "--exclude-module=setuptools",
-        "--exclude-module=pydoc",
-        # 只包含必要的数据文件
-        "--add-data=resources/icons:resources/icons",
-        # 优化 Python 字节码
-        "--python-option=O",
-        "main.py"
+        # 包含运行时必要的库
+        "--collect-all=faster_whisper",
+        "--collect-all=pyaudio",
+        # 启用控制台输出以便调试
+        "--debug=imports",
+        # 添加权限和启动配置
+        "--runtime-tmpdir", "/tmp",
+        "launcher.py"
     ]
     
     logger.info(f"执行命令: {' '.join(cmd)}")
@@ -336,6 +373,7 @@ def build_macos():
     
     if result.returncode != 0:
         logger.error(f"构建失败: {result.stderr}")
+        logger.error(f"构建输出: {result.stdout}")
         return False
     
     logger.info("应用构建成功")
@@ -350,51 +388,141 @@ def build_macos():
             with open(plist_path, 'rb') as f:
                 plist_data = load(f)
             
-            plist_data['NSMicrophoneUsageDescription'] = '需要麦克风权限进行语音输入'
-            plist_data['NSAppleEventsUsageDescription'] = '需要控制其他应用以插入文本'
+            # 添加必要的权限声明和应用配置
+            plist_data.update({
+                'CFBundleDisplayName': 'Voice Typer',
+                'CFBundleName': 'VoiceTyper',
+                'CFBundleIdentifier': 'com.bongcaca.voicetyper',
+                'CFBundleVersion': get_version_info()['version'],
+                'CFBundleShortVersionString': get_version_info()['version'],
+                'NSMicrophoneUsageDescription': 'VoiceTyper需要访问您的麦克风来进行语音识别和转写',
+                'NSAppleEventsUsageDescription': 'VoiceTyper需要控制其他应用以自动输入转写的文本',
+                'NSAccessibilityUsageDescription': 'VoiceTyper需要辅助功能权限以便在其他应用中输入文本',
+                'LSUIElement': False,  # 允许在Dock中显示
+                'NSRequiresAquaSystemAppearance': False,  # 支持暗色模式
+                'NSHighResolutionCapable': True,  # 支持高分辨率显示
+                # 添加URL类型处理（如果需要）
+                'CFBundleDocumentTypes': [],
+                'CFBundleURLTypes': []
+            })
             
             with open(plist_path, 'wb') as f:
                 dump(plist_data, f)
             
             logger.info("已更新应用的Info.plist并添加必要的权限声明")
             
+            # 设置正确的文件权限
             import stat
             os.chmod(str(plist_path), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-            logger.info("已设置Info.plist权限: 644")
-        
+            
+            # 设置可执行文件权限
+            executable_path = app_path / "Contents" / "MacOS" / "VoiceTyper"
+            if executable_path.exists():
+                os.chmod(str(executable_path), stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                logger.info("已设置可执行文件权限")
+                
+                # 尝试代码签名（如果有开发者证书）
+                try:
+                    entitlements_path = Path("VoiceTyper.entitlements")
+                    if entitlements_path.exists():
+                        sign_cmd = [
+                            "codesign",
+                            "--force", 
+                            "--sign", "-",  # 使用adhoc签名
+                            "--entitlements", str(entitlements_path),
+                            "--deep",
+                            str(app_path)
+                        ]
+                        
+                        sign_result = subprocess.run(sign_cmd, capture_output=True, text=True)
+                        if sign_result.returncode == 0:
+                            logger.info("✅ 应用代码签名成功")
+                        else:
+                            logger.warning(f"⚠️  代码签名失败，但应用仍可使用: {sign_result.stderr}")
+                    else:
+                        logger.warning("⚠️  未找到entitlements文件，跳过代码签名")
+                except Exception as e:
+                    logger.warning(f"⚠️  代码签名过程出错，但应用仍可使用: {e}")
+            
         except Exception as e:
             logger.error(f"修改Info.plist时出错: {e}")
             return False
     
-    # 创建 DMG 前清理不必要的文件
+    # 验证应用结构
+    logger.info("验证应用结构...")
+    app_contents = app_path / "Contents"
+    required_paths = [
+        "MacOS/VoiceTyper",
+        "Info.plist", 
+        "Resources"
+    ]
+    
+    for path in required_paths:
+        full_path = app_contents / path
+        if full_path.exists():
+            logger.info(f"✓ 存在: {path}")
+        else:
+            logger.error(f"✗ 缺失: {path}")
+            return False
+    
+    # 测试应用是否可以启动
+    logger.info("测试应用启动...")
     try:
-        # 删除 __pycache__ 目录
-        for pycache in app_path.rglob("__pycache__"):
-            shutil.rmtree(pycache)
-        # 删除 .pyc 文件
-        for pyc in app_path.rglob("*.pyc"):
-            pyc.unlink()
-        # 删除测试文件
-        for test in app_path.rglob("test_*.py"):
-            test.unlink()
-        logger.info("已清理不必要的文件")
+        # 在后台启动应用进行快速测试
+        test_process = subprocess.Popen([str(app_path / "Contents" / "MacOS" / "VoiceTyper"), "--help"], 
+                                       stdout=subprocess.PIPE, 
+                                       stderr=subprocess.PIPE)
+        try:
+            stdout, stderr = test_process.communicate(timeout=10)
+            if test_process.returncode == 0 or "usage:" in stdout.decode():
+                logger.info("✓ 应用可以正常启动")
+            else:
+                logger.warning(f"应用启动测试可能有问题: {stderr.decode()}")
+        except subprocess.TimeoutExpired:
+            logger.info("✓ 应用启动测试超时，但这通常是正常的（应用可能在等待用户输入）")
+            test_process.kill()
+            test_process.wait()  # 等待进程完全退出
     except Exception as e:
-        logger.warning(f"清理文件时出错: {e}")
-
+        logger.warning(f"应用启动测试失败: {e}")
+    
     # 创建 DMG
     try:
-        logger.info("创建 DMG 安装镜像...")
+        version_info = get_version_info()
+        arch_display = version_info['architecture_display']
+        dmg_name = f"VoiceTyper-{version_info['version']}-{version_info['architecture']}.dmg"
+        volume_name = f"VoiceTyper {arch_display}"
+        
+        logger.info(f"创建 {arch_display} 架构的 DMG 安装镜像: {dmg_name}")
+        
+        # 确保没有同名的DMG文件被挂载或存在
+        if os.path.exists(dmg_name):
+            logger.info(f"删除现有的DMG文件: {dmg_name}")
+            os.remove(dmg_name)
+        
+        # 尝试卸载可能挂载的DMG
+        try:
+            unmount_result = subprocess.run(["hdiutil", "detach", f"/Volumes/{volume_name}"], 
+                                          capture_output=True, text=True, timeout=10)
+            if unmount_result.returncode == 0:
+                logger.info(f"卸载了现有的{volume_name}镜像")
+        except:
+            pass  # 忽略卸载错误，可能本来就没有挂载
+        
+        # 等待一下确保资源释放
+        import time
+        time.sleep(2)
+        
         dmg_cmd = [
             "create-dmg",
-            "--volname", "VoiceTyper",
+            "--volname", volume_name,
             "--window-pos", "200", "120",
             "--window-size", "800", "450",
             "--icon-size", "100",
             "--icon", "VoiceTyper.app", "200", "190",
             "--app-drop-link", "600", "185",
-            "--format", "UDZO",  # 使用 UDZO 格式进行压缩
-            "--no-internet-enable",  # 禁用网络链接
-            "VoiceTyper.dmg",
+            "--format", "UDZO",
+            "--no-internet-enable",
+            dmg_name,
             "dist/VoiceTyper.app"
         ]
         
@@ -402,12 +530,40 @@ def build_macos():
         if dmg_result.returncode != 0:
             logger.error(f"创建 DMG 失败: {dmg_result.stderr}")
             logger.info("请检查 create-dmg 是否已安装: brew install create-dmg")
+            # 如果DMG创建失败，尝试简单的方法
+            logger.info("尝试使用hdiutil创建DMG...")
+            try:
+                simple_dmg_cmd = [
+                    "hdiutil", "create", "-volname", volume_name,
+                    "-srcfolder", "dist/VoiceTyper.app",
+                    "-ov", "-format", "UDZO", dmg_name
+                ]
+                simple_result = subprocess.run(simple_dmg_cmd, capture_output=True, text=True)
+                if simple_result.returncode == 0:
+                    logger.info(f"使用hdiutil成功创建DMG: {dmg_name}")
+                else:
+                    logger.error(f"hdiutil创建DMG也失败: {simple_result.stderr}")
+            except Exception as e:
+                logger.error(f"备用DMG创建方法失败: {e}")
         else:
-            logger.info("DMG 安装镜像已创建: VoiceTyper.dmg")
+            logger.info(f"DMG 安装镜像已创建: {dmg_name}")
+            
+        # 显示构建信息
+        logger.info("=" * 60)
+        logger.info(f"🎉 构建完成！")
+        logger.info(f"架构: {arch_display} ({version_info['architecture']})")
+        logger.info(f"版本: {version_info['version']}")
+        logger.info(f"DMG文件: {dmg_name}")
+        logger.info("=" * 60)
+        
     except Exception as e:
         logger.error(f"创建 DMG 时出错: {e}")
     
     logger.info(f"macOS 应用已构建完成: {app_path}")
+    logger.info("使用提示：")
+    logger.info("1. 首次运行时，macOS会要求授予麦克风和辅助功能权限")
+    logger.info("2. 如果应用无法启动，请检查系统偏好设置 -> 安全性与隐私 -> 通用，允许运行该应用")
+    logger.info("3. 可以通过双击 .app 文件或从 Applications 文件夹启动应用")
     return True
 
 def build_windows():
@@ -501,8 +657,15 @@ def main():
             logger.error(f"不支持的平台: {sys.platform}")
             return 1
     
-    logger.info(f"开始构建 Voice Typer 应用，目标平台: {platform}")
-    logger.info(f"版本: {VERSION}，构建日期: {BUILD_DATE}")
+    # 显示构建信息
+    version_info = get_version_info()
+    logger.info("=" * 60)
+    logger.info(f"🚀 开始构建 Voice Typer 应用")
+    logger.info(f"目标平台: {platform}")
+    logger.info(f"版本: {VERSION}")
+    logger.info(f"构建日期: {BUILD_DATE}")
+    logger.info(f"架构: {version_info['architecture_display']} ({version_info['architecture']})")
+    logger.info("=" * 60)
     
     # 检查依赖
     if not args.skip_deps_check and not check_requirements():

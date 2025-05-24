@@ -9,6 +9,7 @@ import glob
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from PySide6.QtCore import QMetaObject, Qt, Q_ARG
 from utils.logging import setup_logging
 from utils.config import Config
 
@@ -307,123 +308,183 @@ def run_recording_loop(window, engine, recorder):
         logger.debug("录音循环结束")
 
 def on_toggle_recording(window, engine, recorder):
-    """处理录音按钮点击事件"""
-    # 如果当前正在录音，则停止录音
-    if window.is_recording:
-        logger.debug("停止录音")
-        window.update_status("正在停止录音...")
-        window.is_recording = False
-        window.update_recording_state(False)
-        
-        # 如果有正在运行的录音线程，等待其结束
-        if hasattr(window, "_recording_thread") and window._recording_thread and window._recording_thread.is_alive():
-            # 这里不需要做什么，线程会自行检测录音状态并退出
-            pass
-            
-        return
-        
-    # 开始新的录音
-    device_id = window.get_selected_device_id()
-    if device_id is None:
-        logger.error("没有选择输入设备")
-        window.update_status("错误: 没有选择输入设备")
-        return
-        
-    # 获取语言设置
-    language = window.get_selected_language()
-    target_language = window.get_target_language()
-    mode = window.transcription_mode
-    
-    logger.debug(f"开始录音，使用设备ID: {device_id}, 语言: {language}, 目标语言: {target_language}, 模式: {mode}")
-    
-    # 确保模型已加载
+    """处理录音开关事件"""
     try:
-        # 先检查模型是否已加载
-        if engine.model is None:
-            logger.info("模型尚未加载，正在加载...")
-            window.update_status("正在加载模型...")
+        if not window.is_recording:
+            # 开始录音前显示loading状态
+            if not window.model_preloaded:
+                window.status_label.setText("正在准备模型，请稍候...")
+                window.toggle_button.setEnabled(False)
+                window.loading_label.show()
+                
+                # 在后台线程中加载模型
+                def load_model_and_start():
+                    try:
+                        logger.info("模型尚未加载，正在加载...")
+                        engine.ensure_model_loaded()
+                        
+                        # 回到主线程更新UI并开始录音
+                        QMetaObject.invokeMethod(window, "model_loaded_start_recording", 
+                                               Qt.QueuedConnection)
+                    except Exception as e:
+                        logger.error(f"加载模型失败: {e}")
+                        QMetaObject.invokeMethod(window, "model_load_failed", 
+                                               Qt.QueuedConnection, 
+                                               Q_ARG(str, str(e)))
+                
+                import threading
+                load_thread = threading.Thread(target=load_model_and_start)
+                load_thread.daemon = True
+                load_thread.start()
+                return
             
-        engine.ensure_model_loaded()
-        logger.info(f"使用模型: {engine.model_name}")
+            # 模型已准备好，直接开始录音
+            _start_recording(window, engine, recorder)
+        else:
+            # 停止录音
+            _stop_recording(window, engine, recorder)
+            
     except Exception as e:
-        logger.error(f"加载模型失败: {e}")
-        window.update_status(f"加载模型失败: {str(e)}")
-        return
-        
-    # 显式设置录音设备
+        logger.error(f"录音开关事件处理出错: {e}")
+        window.status_label.setText(f"操作失败: {str(e)}")
+
+def _start_recording(window, engine, recorder):
+    """启动录音的具体实现"""
     try:
-        # 确保设备初始化
-        if recorder.device_index != device_id:
-            logger.info(f"设置录音设备: {device_id}")
-            
+        # 获取录音参数
+        device_id = window.current_device_id
+        language = window.get_selected_language()
+        target_language = window.get_target_language()
+        mode = window.get_transcription_mode()
+        
+        # 获取用户选择的模型
+        selected_model = window.model_combo.currentData()
+        if selected_model and selected_model in window.available_models:
+            user_model = selected_model
+        else:
+            user_model = None
+        
+        logger.debug(f"开始录音，使用设备ID: {device_id}, 语言: {language}, 目标语言: {target_language}, 模式: {mode}, 用户模型: {user_model}")
+        
+        # 确保模型已加载，传入用户选择的模型
+        engine.ensure_model_loaded(user_selected_model=user_model)
+        logger.info(f"使用模型: {engine.model_name}")
+        
+        # 设置录音设备
         recorder.set_device(device_id)
         logger.info(f"已设置录音设备: {device_id}")
+        
+        # 启动录音线程
+        logger.info(f"录音设置 - 模式: {mode}, 语言: {language}, 翻译目标: {target_language}")
+        
+        # 根据模式设置录音参数
+        realtime_mode = (mode == "realtime")
+        realtime_callback = None
+        
+        # 设置音频电平更新回调（不管是否实时模式都需要）
+        def on_audio_data(audio_data, level):
+            # 直接调用update_audio_level方法，因为这个方法是线程安全的
+            try:
+                window.update_audio_level(level)
+            except Exception as e:
+                logger.warning(f"更新音频电平失败: {e}")
+        
+        # 不管什么模式都需要电平显示回调
+        realtime_callback = on_audio_data
+        
+        success = recorder.start_recording(
+            device_index=device_id, 
+            realtime_mode=realtime_mode, 
+            realtime_callback=realtime_callback
+        )
+        if success:
+            # 使用window的更新方法来正确更新UI状态
+            window.update_recording_state(True)
+            window.update_status("正在录音...")
+            if hasattr(window, 'loading_label'):
+                window.loading_label.hide()
+            logger.info("录音线程启动成功")
+            
+            # 播放开始录音提示音
+            import threading
+            def play_start_sound():
+                try:
+                    import os
+                    os.system('afplay /System/Library/Sounds/Ping.aiff')
+                except:
+                    pass
+            threading.Thread(target=play_start_sound, daemon=True).start()
+        else:
+            logger.error("录音线程启动失败")
+            window.update_status("录音启动失败")
+            if hasattr(window, 'loading_label'):
+                window.loading_label.hide()
+            
     except Exception as e:
-        logger.error(f"设置录音设备失败: {e}")
-        window.update_status(f"设置录音设备失败: {str(e)}")
-        return
-        
-    # 设置录音状态
-    window.is_recording = True
-    window.update_recording_state(True)
-    window.update_status("录音中...")
+        logger.error(f"启动录音出错: {e}")
+        window.status_label.setText(f"录音启动失败: {str(e)}")
+        window.loading_label.hide()
+
+def _stop_recording(window, engine, recorder):
+    """停止录音的具体实现"""
+    logger.debug("停止录音")
+    logger.info("停止录音")
     
-    # 使用线程进行录音和转写
-    window._recording_thread = threading.Thread(
-        target=run_recording_loop, 
-        args=(window, engine, recorder)
-    )
-    window._recording_thread.daemon = True
-    window._recording_thread.start()
+    # 更新UI状态  
+    window.update_recording_state(False)
+    window.update_status("正在处理录音...")
     
-    # 确保线程成功启动
-    time.sleep(0.1)
-    if not window._recording_thread.is_alive():
-        logger.error("录音线程启动失败")
-        window.is_recording = False
-        window.update_recording_state(False)
-        window.update_status("录音线程启动失败")
-        return
+    # 停止录音
+    recording_file = recorder.stop()
+    if recording_file:
+        logger.info(f"开始转写录音文件: {recording_file}")
         
-    logger.info("录音线程启动成功")
+        # 在后台线程处理转写，避免阻塞UI
+        def process_transcription():
+            try:
+                # 转写音频
+                language = window.get_selected_language()
+                target_language = window.get_target_language()
+                
+                transcript = engine.transcribe(recording_file, language=language, target_language=target_language)
+                
+                # 回到主线程更新UI
+                QMetaObject.invokeMethod(window, "transcription_completed", 
+                                       Qt.QueuedConnection, 
+                                       Q_ARG(str, transcript))
+                
+            except Exception as e:
+                logger.error(f"转写过程中出错: {e}")
+                QMetaObject.invokeMethod(window, "transcription_failed", 
+                                       Qt.QueuedConnection, 
+                                       Q_ARG(str, str(e)))
+        
+        import threading
+        transcribe_thread = threading.Thread(target=process_transcription)
+        transcribe_thread.daemon = True
+        transcribe_thread.start()
+    else:
+        logger.warning("未获取到录音文件")
+        window.status_label.setText("录音文件获取失败")
 
 def on_model_change(window, engine, model_name):
-    """处理模型变更事件"""
-    # 检查是否正在录音
-    if window.is_recording:
-        logger.warning("无法在录音过程中更改模型")
-        window.update_status("请先停止录音，然后再更改模型")
-        return
-        
-    logger.info(f"切换到模型: {model_name}")
-    window.update_status(f"正在切换到模型: {model_name}...")
-    
-    # 重置引擎状态
-    engine.model = None
-    engine.initialized = False
-    
-    # 强制设置模型名称
-    engine.settings = {
-        "model_name": model_name,
-        "device": "cpu",
-        "compute_type": "int8",
-        "beam_size": 5,
-        "threads": min(os.cpu_count(), 8)  # 使用多线程
-    }
-    
+    """处理模型切换事件"""
     try:
-        # 显示正在加载的提示
-        window.update_status(f"正在加载模型 {model_name}...")
-        logger.info(f"开始加载模型: {model_name}")
+        logger.info(f"切换到模型: {model_name}")
         
-        # 重新加载模型
-        engine.ensure_model_loaded()
+        # 设置用户选择的模型
+        engine.set_user_model(model_name)
         
-        window.update_status(f"已切换到模型: {model_name}")
-        logger.info(f"模型切换成功: {model_name}")
+        # 更新窗口状态
+        window.status_label.setText(f"已选择模型: {model_name}")
+        
+        # 保存模型选择到配置
+        if window.config:
+            window.config.set("last_model", model_name)
+            
     except Exception as e:
-        logger.error(f"切换模型失败: {e}")
-        window.update_status(f"切换模型失败: {str(e)}")
+        logger.error(f"切换模型时出错: {e}")
+        window.status_label.setText(f"切换模型失败: {str(e)}")
 
 def main():
     """主函数"""
@@ -443,6 +504,81 @@ def main():
     logger.info(f"操作系统: {platform.system()} {platform.release()}")
     logger.info(f"Python版本: {platform.python_version()}")
     
+    # 检查是否通过launcher启动
+    launched_by_launcher = os.environ.get('VOICETYPER_LAUNCHED_BY_LAUNCHER', 'false').lower() == 'true'
+    if launched_by_launcher:
+        logger.info("✅ 通过launcher启动，权限应已检查")
+    
+    # macOS麦克风权限检查 - 增强版本
+    if platform.system() == "Darwin":
+        from utils.permissions import (
+            check_microphone_permission, 
+            request_microphone_permission, 
+            show_permission_dialog,
+            check_tcc_permission,
+            reset_microphone_permission,
+            get_current_bundle_id
+        )
+        
+        logger.info("检查麦克风权限...")
+        
+        # 显示当前环境信息
+        bundle_id = get_current_bundle_id()
+        term_program = os.environ.get('TERM_PROGRAM', 'Unknown')
+        logger.info(f"当前运行环境: {term_program}, Bundle ID: {bundle_id}")
+        
+        # 检查是否在打包应用中运行
+        is_packaged_app = '.app/Contents/MacOS/' in sys.executable
+        logger.info(f"运行模式: {'打包应用' if is_packaged_app else '开发环境'}")
+        
+        # 先检查TCC数据库权限状态
+        tcc_permitted = check_tcc_permission()
+        logger.info(f"TCC数据库权限状态: {'已授权' if tcc_permitted else '未授权'}")
+        
+        # 实际检查麦克风访问能力
+        mic_accessible = check_microphone_permission()
+        logger.info(f"麦克风实际访问状态: {'可访问' if mic_accessible else '不可访问'}")
+        
+        if not mic_accessible:
+            logger.warning("麦克风权限检查失败")
+            
+            if is_packaged_app:
+                # 打包应用的权限处理更简单
+                logger.info("检测到打包应用，尝试触发系统权限对话框...")
+                if request_microphone_permission():
+                    logger.info("麦克风权限申请成功")
+                else:
+                    logger.error("麦克风权限申请失败")
+                    # 对于打包应用，提供更简单的错误信息
+                    print("\n❌ 需要麦克风权限！")
+                    print("请在系统弹出的权限对话框中点击'允许'，")
+                    print("或者前往 系统偏好设置 > 安全性与隐私 > 隐私 > 麦克风")
+                    print("手动勾选 VoiceTyper 应用")
+                    return
+            else:
+                # 开发环境的权限处理
+                should_continue = show_permission_dialog()
+                
+                if should_continue:
+                    # 尝试请求权限
+                    logger.info("尝试申请麦克风权限...")
+                    if request_microphone_permission():
+                        logger.info("麦克风权限申请成功")
+                    else:
+                        logger.error("麦克风权限申请失败")
+                        print("\n❌ 权限申请失败！")
+                        print("请按照以下步骤手动设置权限：")
+                        print("1. 打开 系统偏好设置 > 安全性与隐私 > 隐私")
+                        print("2. 选择 麦克风")
+                        print("3. 勾选 Terminal 或 Python")
+                        print("4. 重新运行程序")
+                        return
+                else:
+                    logger.info("用户选择不继续，程序退出")
+                    return
+        else:
+            logger.info("麦克风权限检查通过")
+    
     # 检查配置
     logger.debug(f"配置目录: {config._get_config_dir()}")
     logger.debug(f"模型目录: {config.models_dir}")
@@ -454,24 +590,29 @@ def main():
     try:
         from core.engine import WhisperEngine
         from core.recorder import AudioRecorder
+        from core.hotkey_listener import HotkeyListener
         
-        # 初始化语音引擎
+        # 初始化组件
         engine = WhisperEngine(config)
-        
-        # 初始化录音器
         recorder = AudioRecorder()
+        hotkey_listener = HotkeyListener()
         
-        # 设置回调
         def setup_callbacks(window):
+            # 保持原有的回调设置不变
             window.on_toggle_recording = lambda: on_toggle_recording(window, engine, recorder)
-            # 连接信号到回调函数
             window.toggle_recording_signal.connect(lambda: on_toggle_recording(window, engine, recorder))
-            # 连接设备变更信号
             window.device_changed.connect(recorder.set_device)
-            # 连接模式切换信号
             window.transcription_mode_changed.connect(lambda mode: logger.info(f"转写模式已切换为: {mode}"))
-            # 连接模型变更信号
             window.model_changed.connect(lambda model: on_model_change(window, engine, model))
+            
+            # 添加fn双击快捷键支持
+            def on_fn_double_click():
+                logger.info("触发fn双击快捷键")
+                if not window.is_recording:
+                    window.toggle_button.click()
+            
+            # 启动全局快捷键监听
+            hotkey_listener.start(on_fn_double_click)
         
         # 运行GUI应用
         from PySide6.QtWidgets import QApplication

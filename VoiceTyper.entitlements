@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 麦克风权限 -->
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+    
+    <!-- 网络权限 -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    
+    <!-- 文件系统访问权限 -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    
+    <!-- 辅助功能权限 -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    
+    <!-- 允许应用访问用户数据 -->
+    <key>com.apple.security.personal-information.location</key>
+    <false/>
+    
+    <!-- 禁用沙盒（对于独立应用） -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    
+    <!-- 允许代码注入 -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    
+    <!-- 允许unsigned executable memory -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    
+    <!-- 允许JIT -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    
+    <!-- 硬化运行时兼容性 -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist> 

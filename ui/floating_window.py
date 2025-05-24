@@ -174,9 +174,28 @@ class FloatingWindow(QMainWindow):
         self.device_initialized = False
         self.is_recording = False
         self.transcription_mode = "batch"  # 默认是批量模式
-        self.available_models = []  # 可用模型列表
+        self.available_models = []
         self.last_transcription = ""  # 最近的转写结果
         self.target_language = "auto"  # 默认不翻译，自动检测语言
+        
+        # 添加模型预加载状态跟踪
+        self.model_preloading = False
+        self.model_preloaded = False
+        
+        # 创建加载状态提示
+        self.loading_label = QLabel("正在准备模型，请稍候...")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(255, 255, 255, 0.9);
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 10px;
+                font-size: 14px;
+                color: #333;
+            }
+        """)
+        self.loading_label.hide()
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -487,6 +506,13 @@ class FloatingWindow(QMainWindow):
         self.idle_timer.timeout.connect(self.update_idle_visualization)
         self.idle_timer.start(100)  # 100毫秒更新一次
         
+        # 添加fn键监听
+        self.fn_press_time = 0
+        self.fn_press_count = 0
+        
+        # 启动模型预加载（在后台线程中）
+        self.start_model_preload()
+        
     def toggle_right_panel(self):
         """折叠/展开右侧面板"""
         if self.right_panel.isVisible():
@@ -514,6 +540,22 @@ class FloatingWindow(QMainWindow):
         # 处理空格键触发录音
         if event.key() == Qt.Key_Space:
             self.toggle_button.click()
+            event.accept()
+            return
+            
+        # 处理fn键双击
+        if event.key() == Qt.Key_Meta:  # fn键在Qt中通常被映射为Meta键
+            current_time = time.time()
+            if current_time - self.fn_press_time < 0.3:  # 300ms内的按键认为是双击
+                self.fn_press_count += 1
+                if self.fn_press_count == 2:  # 双击检测
+                    self.fn_press_count = 0
+                    # 开始录音
+                    if not self.is_recording:
+                        self.toggle_button.click()
+            else:
+                self.fn_press_count = 1
+            self.fn_press_time = current_time
             event.accept()
             return
             
@@ -582,7 +624,7 @@ class FloatingWindow(QMainWindow):
             self.logger.warning("设备未初始化，请先选择输入设备")
             return
             
-        if not self.model_initialized:
+        if not self.model_preloaded:
             self.logger.warning("模型未初始化，请等待模型加载完成")
             return
             
@@ -634,6 +676,7 @@ class FloatingWindow(QMainWindow):
             if len(input_devices) > 0:
                 self.device_combo.setCurrentIndex(0)
                 device_id = self.device_combo.currentData()
+                self.current_device_id = device_id  # 设置当前设备ID
                 self.logger.info(f"默认选择输入设备: {self.device_combo.currentText()} (ID: {device_id})")
                 self.device_initialized = True  # 标记设备已初始化
                 self.toggle_button.setEnabled(True)
@@ -655,6 +698,7 @@ class FloatingWindow(QMainWindow):
         """设备切换事件"""
         if index >= 0:
             device_id = self.device_combo.currentData()
+            self.current_device_id = device_id  # 更新当前设备ID
             self.logger.info(f"已选择设备: {self.device_combo.currentText()} (ID: {device_id})")
             # 发出设备改变信号
             self.device_changed.emit(device_id)
@@ -710,7 +754,7 @@ class FloatingWindow(QMainWindow):
             self.logger.error(f"插入文本过程中出错: {e}")
         
     def update_audio_level(self, level):
-        """更新音频电平"""
+        """更新音量显示"""
         self.visualizer.update_level(level)
         
     def mousePressEvent(self, event):
@@ -738,11 +782,6 @@ class FloatingWindow(QMainWindow):
         self.status_label.setText(f"Result: {text}")
         self.logger.info(f"Recognition result: {text}")
         
-    def update_audio_level(self, level):
-        """更新音量显示"""
-        self.visualizer.update_level(level)
-        self.logger.debug(f"Audio level: {level}%")
-
     def get_selected_device_id(self):
         """获取当前选择的设备ID"""
         if self.device_combo.count() == 0:
@@ -1232,3 +1271,105 @@ class FloatingWindow(QMainWindow):
         def emit(self, record):
             msg = self.format(record)
             self.window.result_text.append(msg) 
+
+    def start_model_preload(self):
+        """启动模型预加载（在后台线程中）"""
+        import threading
+        preload_thread = threading.Thread(target=self._start_model_preload)
+        preload_thread.daemon = True
+        preload_thread.start()
+
+    def _start_model_preload(self):
+        """在后台线程中启动模型预加载"""
+        try:
+            self.logger.info("开始模型预加载...")
+            self.model_preloading = True
+            self.model_preloaded = False
+            
+            # 初始化模型列表
+            self.init_model_list()
+            
+            self.model_preloaded = True
+            self.logger.info("模型预加载完成")
+        except Exception as e:
+            self.logger.error(f"启动模型预加载失败: {e}")
+            self.model_preloaded = False
+            self.model_preloading = False
+            self.status_label.setText(f"启动模型预加载失败: {str(e)}")
+            self.toggle_button.setEnabled(True)
+            self.model_combo.setEnabled(True)
+            self.download_button.setEnabled(True)
+
+    def update_wave_animation(self):
+        """更新波形动画"""
+        if not self.is_recording and hasattr(self, 'visualizer'):
+            # 使用AudioRecorder的get_audio_level方法获取随机值
+            from core.recorder import AudioRecorder
+            recorder = getattr(self, '_temp_recorder', None)
+            if recorder is None:
+                recorder = AudioRecorder()
+                self._temp_recorder = recorder
+            
+            level = recorder.get_audio_level()
+            self.update_audio_level(level)
+
+    def get_transcription_mode(self):
+        """获取当前转录模式"""
+        return self.transcription_mode
+
+    @Slot()
+    def model_loaded_start_recording(self):
+        """模型加载完成后启动录音（在主线程中调用）"""
+        self.model_preloaded = True
+        self.loading_label.hide()
+        self.toggle_button.setEnabled(True)
+        
+        # 直接启动录音
+        from main import _start_recording
+        from core.engine import WhisperEngine
+        from core.recorder import AudioRecorder
+        
+        # 获取全局对象 - 这里需要从main模块获取
+        # 由于这是在主线程中调用，我们可以访问全局变量
+        engine = globals().get('engine') or WhisperEngine(self.config)
+        recorder = globals().get('recorder') or AudioRecorder()
+        
+        _start_recording(self, engine, recorder)
+    
+    @Slot(str)
+    def model_load_failed(self, error_message):
+        """模型加载失败处理（在主线程中调用）"""
+        self.loading_label.hide()
+        self.toggle_button.setEnabled(True)
+        self.status_label.setText(f"模型加载失败: {error_message}")
+        self.logger.error(f"模型加载失败: {error_message}")
+    
+    @Slot(str)
+    def transcription_completed(self, transcript):
+        """转写完成处理（在主线程中调用）"""
+        try:
+            # 更新转写结果 - 使用已存在的update_result方法
+            self.update_result(transcript)
+            
+            # 恢复按钮状态
+            self.toggle_button.setEnabled(True)
+            
+            # 播放完成提示音
+            import threading
+            def play_complete_sound():
+                try:
+                    import os
+                    os.system('afplay /System/Library/Sounds/Glass.aiff &')
+                except:
+                    pass
+            threading.Thread(target=play_complete_sound, daemon=True).start()
+            
+        except Exception as e:
+            self.logger.error(f"处理转写结果时出错: {e}")
+    
+    @Slot(str)
+    def transcription_failed(self, error_message):
+        """转写失败处理（在主线程中调用）"""
+        self.toggle_button.setEnabled(True)
+        self.status_label.setText(f"转写失败: {error_message}")
+        self.logger.error(f"转写失败: {error_message}") 
