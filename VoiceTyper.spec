@@ -31,7 +31,7 @@ exe = EXE(
     [('v', None, 'OPTION')],
     exclude_binaries=True,
     name='VoiceTyper',
-    debug=False,
+    debug=True,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
