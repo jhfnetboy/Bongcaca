@@ -40,7 +40,7 @@ uname -m
 
 ### 📦 下载对应版本
 
-前往 [Releases 页面](https://github.com/nicolasshimokuryuu/VoiceTyper/releases) 下载：
+前往 [Releases 页面](https://github.com/jhfnetboy/Bongcaca/releases) 下载：
 
 - **Apple Silicon Mac**: `VoiceTyper-[版本号]-arm64.dmg`
 - **Intel Mac**: `VoiceTyper-[版本号]-x86_64.dmg`
