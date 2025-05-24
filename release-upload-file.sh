@@ -1,1 +1,1 @@
-gh release upload v0.30.2 VoiceTyper.dmg
+gh release upload v0.30.11 VoiceTyper.dmg
