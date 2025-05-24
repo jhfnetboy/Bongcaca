@@ -1,6 +1,11 @@
 # VoiceTyper - 智能语音转写工具
 
 一款基于 Whisper 的实时语音转写应用，支持多语言识别和翻译。
+1. 首次运行时，macOS会要求授予麦克风和辅助功能权限，请点击允许即可
+2. Mac在intel芯片和ARM芯片都测试过，其他系统没测试过^_^，请谅解
+3. 如果应用无法启动，请检查系统偏好设置 -> 安全性与隐私 -> 通用，允许运行该应用
+4. 可以通过双击 .app 文件或从 Applications 文件夹启动应用
+
 
 ## 🎯 主要功能
 
@@ -10,6 +15,10 @@
 - **全局快捷键**: 支持 fn 双击快捷键在任意应用中录音
 - **模型选择**: 支持多种 Whisper 模型，可根据精度和速度需求选择
 - **设备选择**: 支持选择不同的音频输入设备
+
+
+## 快速开始开发
+
 
 ## 📥 下载安装
 
@@ -138,6 +147,7 @@ python build_app.py --platform macos
 
 ## 🔍 故障排除
 
+
 ### 常见问题
 
 1. **权限问题**: 确保授予了麦克风和辅助功能权限
@@ -159,4 +169,7 @@ MIT License
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) - 高效的 Whisper 实现
 - [OpenAI Whisper](https://github.com/openai/whisper) - 强大的语音识别模型
 - [PySide6](https://wiki.qt.io/Qt_for_Python) - 跨平台 GUI 框架
+
+
+v0.3.17 - 空语音和DMG权限问题修复
 

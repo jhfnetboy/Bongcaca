@@ -1,1 +1,1 @@
-gh release upload v0.30.11 VoiceTyper.dmg
+gh release upload v0.3.17 VoiceTyper-intel.dmg
