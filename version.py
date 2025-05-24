@@ -1,4 +1,4 @@
-VERSION = "0.3.13"  # 修复命令行权限检查和转写结果显示
+VERSION = "0.3.14"  # 增强权限管理系统，添加权限修复工具
 
 def get_version():
-    return "0.3.13" 
+    return "0.3.14" 

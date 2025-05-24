@@ -1,5 +1,23 @@
 # VoiceTyper Deployment Guide
 
+## 权限问题解决
+
+**⚠️ 如果遇到权限问题，请优先查看：[权限问题解决指南](../README_PERMISSIONS.md)**
+
+常见权限问题：
+- 命令行运行没有麦克风权限
+- 录音无电平显示  
+- 转写结果为空
+
+快速解决：
+```bash
+# 运行权限修复工具
+python fix_permissions.py
+
+# 或手动重置权限
+tccutil reset Microphone
+```
+
 ## Environment Setup
 
 ### Prerequisites
