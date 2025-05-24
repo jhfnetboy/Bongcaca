@@ -25,8 +25,6 @@ conda activate voice_typer && python main.py
 
 ## 当前版本
 
-<<<<<<< HEAD
+
 v0.3.10 - 添加麦克风权限申请和性能优化 
-=======
-v0.3.8 - 修复缺失方法和脚本运行问题
->>>>>>> c567c0b03e6885e7f0b6cb95f6972e071938e8c9
+
