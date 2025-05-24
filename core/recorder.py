@@ -366,6 +366,7 @@ class AudioRecorder:
                             # 使用更高效的电平计算
                             abs_data = np.abs(audio_array, dtype=np.float32)  # 使用float32减少内存
                             mean_squared = np.mean(abs_data**2)
+                            rms = 0  # 初始化rms变量
                             
                             if mean_squared > 0:
                                 rms = np.sqrt(mean_squared)
@@ -375,19 +376,20 @@ class AudioRecorder:
                                 
                                 # 应用对数缩放以提高低音量的可见性
                                 if normalized_level > 0:
-                                    log_level = np.log10(max(0.1, normalized_level)) * 50 + 50
+                                    log_level = np.log10(max(0.01, normalized_level)) * 25 + 25  # 调整缩放参数
                                     level = min(100, max(0, int(log_level)))
                                 else:
                                     level = 0
                                     
-                                # 对于非常低的输入（如虚拟音频设备），提供额外的增益
-                                if level < 5 and rms > 0:
-                                    level = min(50, int(rms / 100))  # 给予一些基础电平
+                                # 对于低输入信号，提供基础电平显示
+                                if level < 3 and rms > 0:
+                                    level = max(5, min(30, int(rms * 10)))  # 增强微弱信号的可见性
                                     
                             else:
                                 level = 0
                         else:
                             level = 0
+                            rms = 0  # 确保rms变量始终有定义
                             
                         # 平滑处理，避免电平跳动过于剧烈
                         if hasattr(self, '_last_level'):
@@ -404,7 +406,7 @@ class AudioRecorder:
                     # 减少日志记录频率
                     time_since_last_level_log += time.time() - loop_start
                     if time_since_last_level_log >= level_log_interval:
-                        self.logger.debug(f"当前音频电平: {self.current_audio_level}%, 数据长度: {len(data)}")
+                        self.logger.debug(f"当前音频电平: {self.current_audio_level}%, 数据长度: {len(data)}, RMS: {rms:.2f}")
                         time_since_last_level_log = 0
                     
                     # 回调处理（用于电平更新和实时转写）

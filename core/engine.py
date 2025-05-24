@@ -370,17 +370,17 @@ class WhisperEngine:
                 if memory_gb >= 16:
                     # 高内存系统：使用更精细的参数
                     vad_params = {
-                        "min_silence_duration_ms": 150,
-                        "speech_pad_ms": 100,
-                        "threshold": 0.3
+                        "min_silence_duration_ms": 100,  # 减少静音检测时间
+                        "speech_pad_ms": 200,  # 增加语音填充
+                        "threshold": 0.1  # 降低阈值，更容易检测到语音
                     }
                     temperature = 0.0
                 else:
                     # 低内存系统：使用更激进的参数提升速度
                     vad_params = {
-                        "min_silence_duration_ms": 200,
-                        "speech_pad_ms": 50,
-                        "threshold": 0.4
+                        "min_silence_duration_ms": 150,  # 减少静音检测时间
+                        "speech_pad_ms": 100,  # 增加语音填充
+                        "threshold": 0.2  # 降低阈值
                     }
                     temperature = 0.2  # 稍高的temperature可以提升速度
                 
@@ -393,9 +393,8 @@ class WhisperEngine:
                     condition_on_previous_text=False,
                     temperature=temperature,
                     compression_ratio_threshold=2.4,
-                    no_speech_threshold=0.3,
-                    vad_filter=True,
-                    vad_parameters=vad_params,
+                    no_speech_threshold=0.6,  # 提高阈值，减少误判
+                    vad_filter=False,  # 暂时禁用VAD过滤器
                     task=task  # 使用task参数替代translate参数
                 )
                 

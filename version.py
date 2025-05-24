@@ -1,4 +1,4 @@
-VERSION = "0.3.11"  # 修复权限检查QWidget错误
+VERSION = "0.3.12"  # 修复音频电平显示和蓝牙耳机兼容性
 
 def get_version():
-    return "0.3.11" 
+    return "0.3.12" 
