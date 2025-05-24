@@ -406,19 +406,46 @@ class WhisperEngine:
                 # 清理文本
                 transcript = transcript.strip()
                 
-                # 校验结果 - 返回真实的转写结果，不进行替换
-                if not transcript:
-                    self.logger.warning("转写结果为空")
-                    return ""  # 返回空字符串，不添加兜底文案
-                elif len(transcript) < 3:  # 如果结果太短，仍然返回真实结果
-                    self.logger.warning(f"转写结果过短: {transcript}")
-                    return transcript  # 返回真实的短结果
-                elif "感谢使用" in transcript or "广告" in transcript:
-                    self.logger.warning("转写结果包含广告内容，但仍返回真实结果")
-                    return transcript  # 返回真实结果，让用户判断
+                # 检查音频质量和有效性
+                audio_duration = getattr(info, 'duration', 0)
+                vad_duration = getattr(info, 'vad_duration', audio_duration)  # VAD检测到的有效语音时长
                 
-                self.logger.info(f"转写成功，结果长度: {len(transcript)}, 耗时: {transcribe_time:.2f}s")
-                return transcript
+                # 检查是否为无效转写结果
+                is_empty_content = False
+                
+                if not transcript:
+                    # 完全为空
+                    is_empty_content = True
+                    self.logger.warning("转写结果为空")
+                elif audio_duration > 3 and len(transcript) < 5:
+                    # 录音时间长但转写结果很短，可能是无效内容
+                    is_empty_content = True
+                    self.logger.warning(f"录音{audio_duration:.1f}秒但转写结果过短: '{transcript}'")
+                elif vad_duration and vad_duration < audio_duration * 0.1:
+                    # VAD检测到的有效语音时长不足总时长的10%
+                    is_empty_content = True
+                    self.logger.warning(f"有效语音时长{vad_duration:.1f}s不足总时长{audio_duration:.1f}s的10%")
+                else:
+                    # 检查重复文本模式（Whisper幻觉的常见表现）
+                    words = transcript.split()
+                    if len(words) >= 3:
+                        # 检查是否有大量重复的短语
+                        repeated_count = 0
+                        for i in range(len(words) - 2):
+                            phrase = " ".join(words[i:i+3])
+                            if transcript.count(phrase) >= 3:  # 同一个3词短语重复3次以上
+                                repeated_count += 1
+                        
+                        if repeated_count >= 2:  # 有2个以上重复短语
+                            is_empty_content = True
+                            self.logger.warning(f"检测到重复文本模式，可能是幻觉: '{transcript}'")
+                
+                # 返回结果
+                if is_empty_content:
+                    return "录音内容为空"
+                else:
+                    self.logger.info(f"转写成功，结果长度: {len(transcript)}, 耗时: {transcribe_time:.2f}s")
+                    return transcript
                 
             except Exception as e:
                 self.logger.error(f"转写音频过程中出错: {str(e)}")

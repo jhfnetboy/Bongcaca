@@ -445,22 +445,42 @@ def build_macos():
         # 在后台启动应用进行快速测试
         test_process = subprocess.Popen([str(app_path / "Contents" / "MacOS" / "VoiceTyper"), "--help"], 
                                        stdout=subprocess.PIPE, 
-                                       stderr=subprocess.PIPE,
-                                       timeout=10)
-        stdout, stderr = test_process.communicate(timeout=10)
-        if test_process.returncode == 0 or "usage:" in stdout.decode():
-            logger.info("✓ 应用可以正常启动")
-        else:
-            logger.warning(f"应用启动测试可能有问题: {stderr.decode()}")
-    except subprocess.TimeoutExpired:
-        logger.info("✓ 应用启动测试超时，但这通常是正常的（应用可能在等待用户输入）")
-        test_process.kill()
+                                       stderr=subprocess.PIPE)
+        try:
+            stdout, stderr = test_process.communicate(timeout=10)
+            if test_process.returncode == 0 or "usage:" in stdout.decode():
+                logger.info("✓ 应用可以正常启动")
+            else:
+                logger.warning(f"应用启动测试可能有问题: {stderr.decode()}")
+        except subprocess.TimeoutExpired:
+            logger.info("✓ 应用启动测试超时，但这通常是正常的（应用可能在等待用户输入）")
+            test_process.kill()
+            test_process.wait()  # 等待进程完全退出
     except Exception as e:
         logger.warning(f"应用启动测试失败: {e}")
     
     # 创建 DMG
     try:
         logger.info("创建 DMG 安装镜像...")
+        
+        # 确保没有同名的DMG文件被挂载或存在
+        if os.path.exists("VoiceTyper.dmg"):
+            logger.info("删除现有的DMG文件...")
+            os.remove("VoiceTyper.dmg")
+        
+        # 尝试卸载可能挂载的DMG
+        try:
+            unmount_result = subprocess.run(["hdiutil", "detach", "/Volumes/VoiceTyper"], 
+                                          capture_output=True, text=True, timeout=10)
+            if unmount_result.returncode == 0:
+                logger.info("卸载了现有的VoiceTyper镜像")
+        except:
+            pass  # 忽略卸载错误，可能本来就没有挂载
+        
+        # 等待一下确保资源释放
+        import time
+        time.sleep(2)
+        
         dmg_cmd = [
             "create-dmg",
             "--volname", "VoiceTyper",
@@ -479,6 +499,21 @@ def build_macos():
         if dmg_result.returncode != 0:
             logger.error(f"创建 DMG 失败: {dmg_result.stderr}")
             logger.info("请检查 create-dmg 是否已安装: brew install create-dmg")
+            # 如果DMG创建失败，尝试简单的方法
+            logger.info("尝试使用hdiutil创建DMG...")
+            try:
+                simple_dmg_cmd = [
+                    "hdiutil", "create", "-volname", "VoiceTyper",
+                    "-srcfolder", "dist/VoiceTyper.app",
+                    "-ov", "-format", "UDZO", "VoiceTyper.dmg"
+                ]
+                simple_result = subprocess.run(simple_dmg_cmd, capture_output=True, text=True)
+                if simple_result.returncode == 0:
+                    logger.info("使用hdiutil成功创建DMG: VoiceTyper.dmg")
+                else:
+                    logger.error(f"hdiutil创建DMG也失败: {simple_result.stderr}")
+            except Exception as e:
+                logger.error(f"备用DMG创建方法失败: {e}")
         else:
             logger.info("DMG 安装镜像已创建: VoiceTyper.dmg")
     except Exception as e:
