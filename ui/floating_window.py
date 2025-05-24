@@ -174,7 +174,7 @@ class FloatingWindow(QMainWindow):
         self.device_initialized = False
         self.is_recording = False
         self.transcription_mode = "batch"  # 默认是批量模式
-        self.available_models = []  # 可用模型列表
+        self.available_models = []
         self.last_transcription = ""  # 最近的转写结果
         self.target_language = "auto"  # 默认不翻译，自动检测语言
         
@@ -676,6 +676,7 @@ class FloatingWindow(QMainWindow):
             if len(input_devices) > 0:
                 self.device_combo.setCurrentIndex(0)
                 device_id = self.device_combo.currentData()
+                self.current_device_id = device_id  # 设置当前设备ID
                 self.logger.info(f"默认选择输入设备: {self.device_combo.currentText()} (ID: {device_id})")
                 self.device_initialized = True  # 标记设备已初始化
                 self.toggle_button.setEnabled(True)
@@ -697,6 +698,7 @@ class FloatingWindow(QMainWindow):
         """设备切换事件"""
         if index >= 0:
             device_id = self.device_combo.currentData()
+            self.current_device_id = device_id  # 更新当前设备ID
             self.logger.info(f"已选择设备: {self.device_combo.currentText()} (ID: {device_id})")
             # 发出设备改变信号
             self.device_changed.emit(device_id)
@@ -1320,18 +1322,9 @@ class FloatingWindow(QMainWindow):
             level = recorder.get_audio_level()
             self.update_audio_level(level)
 
-    def update_wave_animation(self):
-        """更新波形动画"""
-        if not self.is_recording and hasattr(self, 'visualizer'):
-            # 使用AudioRecorder的get_audio_level方法获取随机值
-            from core.recorder import AudioRecorder
-            recorder = getattr(self, '_temp_recorder', None)
-            if recorder is None:
-                recorder = AudioRecorder()
-                self._temp_recorder = recorder
-            
-            level = recorder.get_audio_level()
-            self.update_audio_level(level)
+    def get_transcription_mode(self):
+        """获取当前转录模式"""
+        return self.transcription_mode
 
     @Slot()
     def model_loaded_start_recording(self):
