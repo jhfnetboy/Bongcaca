@@ -64,21 +64,22 @@ def request_microphone_permission():
         return False
 
 def show_permission_dialog():
-    """显示权限申请对话框"""
+    """显示权限申请提示（命令行版本）"""
+    print("\n" + "="*60)
+    print("🎤 VoiceTyper 需要麦克风权限")
+    print("="*60)
+    print("VoiceTyper需要访问您的麦克风来进行语音识别。")
+    print()
+    print("如果系统弹出权限对话框，请点击'允许'。")
+    print("或者手动设置权限：")
+    print("1. 打开 系统偏好设置 > 安全性与隐私 > 隐私")
+    print("2. 选择 麦克风")
+    print("3. 确保 VoiceTyper 或 Python 已勾选")
+    print("="*60)
+    
+    # 等待用户确认
     try:
-        from PySide6.QtWidgets import QMessageBox
-        
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle("麦克风权限")
-        msg.setText("VoiceTyper需要访问您的麦克风来进行语音识别。")
-        msg.setInformativeText(
-            "请在系统弹出的权限对话框中点击'允许'，\n"
-            "或者在系统偏好设置 > 安全性与隐私 > 隐私 > 麦克风\n"
-            "中手动开启VoiceTyper的麦克风权限。"
-        )
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec()
-        
-    except Exception as e:
-        logger.error(f"显示权限对话框时出错: {e}") 
+        input("按 Enter 键继续...")
+    except KeyboardInterrupt:
+        print("\n程序已取消")
+        exit(1) 

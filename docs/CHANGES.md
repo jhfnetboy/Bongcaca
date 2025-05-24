@@ -464,3 +464,9 @@ https://huggingface.co/Systran/faster-distil-whisper-large-v3
 - 性能优化：根据系统性能调整beam_size，减少转写时间
 - 新增：utils/permissions.py模块，专门处理macOS权限申请
 
+## 2025-05-24 (0.3.11)
+- 修复：权限检查时的"QWidget: Must construct a QApplication before a QWidget"错误
+- 改进：权限申请对话框改为命令行版本，避免在QApplication创建前使用GUI组件
+- 改进：更新run.sh脚本，添加完整的环境激活和错误处理
+- 测试：验证权限检查和程序启动流程正常
+

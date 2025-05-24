@@ -26,5 +26,5 @@ conda activate voice_typer && python main.py
 ## 当前版本
 
 
-v0.3.10 - 添加麦克风权限申请和性能优化 
+v0.3.11 - 修复权限检查QWidget错误 
 
