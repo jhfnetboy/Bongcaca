@@ -451,3 +451,9 @@ https://huggingface.co/Systran/faster-distil-whisper-large-v3
 - 改进：录音器回调逻辑，不论实时或批量模式都能正确更新音频电平
 - 改进：UI更新机制，使用统一的状态更新方法而非直接操作UI元素
 
+## 2025-05-24 (0.3.8)
+- 修复：python-env.sh脚本conda初始化问题，添加conda shell hook确保环境正确激活
+- 修复：FloatingWindow缺失display_transcription_result方法错误，使用现有的update_result方法
+- 改进：转写完成处理逻辑，统一使用update_result方法更新UI
+- 改进：文档结构优化，将deploy.md重命名为DEPLOY.md
+

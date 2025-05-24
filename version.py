@@ -1,4 +1,4 @@
-VERSION = "0.3.7"  # 修复UI更新和音频电平显示问题
+VERSION = "0.3.8"  # 修复缺失方法和脚本运行问题
 
 def get_version():
-    return "0.3.7" 
+    return "0.3.8" 

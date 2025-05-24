@@ -1357,13 +1357,11 @@ class FloatingWindow(QMainWindow):
     def transcription_completed(self, transcript):
         """转写完成处理（在主线程中调用）"""
         try:
-            # 更新转写结果
-            self.last_transcription = transcript
-            self.display_transcription_result(transcript)
+            # 更新转写结果 - 使用已存在的update_result方法
+            self.update_result(transcript)
             
             # 恢复按钮状态
             self.toggle_button.setEnabled(True)
-            self.status_label.setText("转写完成")
             
             # 播放完成提示音
             import threading

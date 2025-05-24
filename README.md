@@ -20,4 +20,4 @@ conda activate voice_typer && python main.py
 
 ## 当前版本
 
-v0.3.7 - 修复UI更新和音频电平显示问题 
+v0.3.8 - 修复缺失方法和脚本运行问题 

@@ -1,1 +1,1 @@
-conda activate voice_typer && python main.py
+python main.py
