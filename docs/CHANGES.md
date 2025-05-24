@@ -464,6 +464,13 @@ https://huggingface.co/Systran/faster-distil-whisper-large-v3
 - 性能优化：根据系统性能调整beam_size，减少转写时间
 - 新增：utils/permissions.py模块，专门处理macOS权限申请
 
+## 2025-05-24 (0.3.12)
+- 修复：音频电平显示不工作问题，移除过度的性能优化阈值限制
+- 修复：蓝牙耳机（如Bose QC35 II）音频电平检测问题
+- 优化：改进音频电平计算算法，增强对微弱信号的可见性
+- 优化：调整对数缩放参数，提高低音量输入的显示效果
+- 修复：解决VAD过滤器移除所有音频导致转写结果为空的问题
+
 ## 2025-05-24 (0.3.11)
 - 修复：权限检查时的"QWidget: Must construct a QApplication before a QWidget"错误
 - 改进：权限申请对话框改为命令行版本，避免在QApplication创建前使用GUI组件
