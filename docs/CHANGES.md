@@ -1,6 +1,19 @@
 # 更新日志
 
-## 2025-05-24 (0.3.15) - 修复打包应用权限检查问题
+## 2025-05-24 (0.3.16) - 完全修复打包应用权限申请问题
+- 🔧 核心修复：dmg应用现在正确弹出"VoiceTyper权限申请"而非"Terminal权限申请"
+- 🚀 新增：launcher.py独立启动器，确保应用以独立进程身份运行
+- 🔒 新增：VoiceTyper.entitlements权限声明文件，明确声明应用权限
+- ✅ 新增：adhoc代码签名支持，确保bundle ID正确识别为com.bongcaca.voicetyper
+- 🎯 改进：权限申请时机，在GUI初始化前完成权限检查避免冲突
+- 📄 完善：Info.plist配置，添加所有必要的权限描述和应用属性
+- 🔍 增强：bundle ID识别逻辑，正确检测打包应用环境(.app/Contents/MacOS/)
+- 📊 改进：TCC数据库查询逻辑，增加对VoiceTyper应用bundle ID的支持
+- 🛡️ 优化：不同运行环境的权限处理策略（打包应用 vs 开发环境）
+- 📝 新增：详细的测试文档TEST_DMG_PERMISSIONS.md指导权限测试
+- 🚫 修复：.gitignore添加构建产物，避免提交大文件到git
+
+## 2025-05-24 (0.3.15) - 修复打包应用权限检查问题（已被0.3.16取代）
 - 修复：打包后的dmg应用无法弹出麦克风权限申请对话框的问题
 - 增强：bundle ID识别逻辑，正确检测打包应用环境(.app/Contents/MacOS/)
 - 改进：TCC数据库查询逻辑，增加对VoiceTyper应用bundle ID的支持
