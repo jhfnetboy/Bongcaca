@@ -359,9 +359,9 @@ def build_macos():
                 'CFBundleIdentifier': 'com.bongcaca.voicetyper',
                 'CFBundleVersion': get_version_info()['version'],
                 'CFBundleShortVersionString': get_version_info()['version'],
-                'NSMicrophoneUsageDescription': '需要麦克风权限进行语音输入',
-                'NSAppleEventsUsageDescription': '需要控制其他应用以插入文本',
-                'NSAccessibilityUsageDescription': '需要辅助功能权限以进行文本输入',
+                'NSMicrophoneUsageDescription': 'VoiceTyper需要访问您的麦克风来进行语音识别和转写',
+                'NSAppleEventsUsageDescription': 'VoiceTyper需要控制其他应用以自动输入转写的文本',
+                'NSAccessibilityUsageDescription': 'VoiceTyper需要辅助功能权限以便在其他应用中输入文本',
                 'LSUIElement': False,  # 允许在Dock中显示
                 'NSRequiresAquaSystemAppearance': False,  # 支持暗色模式
                 'NSHighResolutionCapable': True,  # 支持高分辨率显示

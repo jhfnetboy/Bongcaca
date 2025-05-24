@@ -1,4 +1,4 @@
-VERSION = "0.3.14"  # 增强权限管理系统，添加权限修复工具
+VERSION = "0.3.15"  # 修复打包应用权限检查，增强bundle ID识别
 
 def get_version():
-    return "0.3.14" 
+    return "0.3.15" 

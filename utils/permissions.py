@@ -12,7 +12,17 @@ def get_current_bundle_id():
         # 尝试获取当前Python可执行文件的路径
         python_path = sys.executable
         
-        # 如果是在Terminal中运行，bundle ID通常是Terminal相关的
+        # 检查是否运行在打包后的macOS应用中
+        if '.app/Contents/MacOS/' in python_path:
+            # 从路径中提取应用名称并生成bundle ID
+            app_path = python_path.split('.app/Contents/MacOS/')[0] + '.app'
+            app_name = os.path.basename(app_path).replace('.app', '')
+            if app_name.lower() == 'voicetyper':
+                return 'com.bongcaca.voicetyper'  # 打包应用的bundle ID
+            else:
+                # 通用打包应用的bundle ID生成
+                return f'com.pyinstaller.{app_name.lower()}'
+        
         # 检查是否在不同的环境中运行
         if 'Cursor' in python_path or 'cursor' in python_path.lower():
             return 'com.todesktop.230313mzl4w4u92'  # Cursor的bundle ID
@@ -20,6 +30,8 @@ def get_current_bundle_id():
             return 'com.apple.Terminal'
         elif 'iTerm' in os.environ.get('TERM_PROGRAM', ''):
             return 'com.googlecode.iterm2'
+        elif 'Visual Studio Code' in os.environ.get('TERM_PROGRAM', ''):
+            return 'com.microsoft.VSCode'
         else:
             # 使用Python的路径作为标识
             return python_path
@@ -38,10 +50,22 @@ def check_tcc_permission(service='kTCCServiceMicrophone'):
             return False
             
         # 使用tccutil检查权限（不需要sudo）
+        # 构建查询条件，包含当前bundle ID和常见的相关应用
+        query_conditions = [
+            f"client='{bundle_id}'",
+            "client LIKE '%python%'",
+            "client LIKE '%Terminal%'", 
+            "client LIKE '%cursor%'",
+            "client LIKE '%voicetyper%'",
+            "client='com.bongcaca.voicetyper'",
+            "client LIKE '%bongcaca%'"
+        ]
+        query = f"SELECT allowed FROM access WHERE service='{service}' AND ({' OR '.join(query_conditions)}) ORDER BY last_modified DESC LIMIT 1;"
+        
         result = subprocess.run([
             'sqlite3', 
             os.path.expanduser('~/Library/Application Support/com.apple.TCC/TCC.db'),
-            f"SELECT allowed FROM access WHERE service='{service}' AND (client='{bundle_id}' OR client LIKE '%python%' OR client LIKE '%Terminal%' OR client LIKE '%cursor%') ORDER BY last_modified DESC LIMIT 1;"
+            query
         ], capture_output=True, text=True, timeout=5)
         
         if result.returncode == 0 and result.stdout.strip() == "1":

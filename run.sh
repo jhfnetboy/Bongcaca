@@ -1,5 +1,5 @@
 #!/bin/bash
-# VoiceTyper v0.3.14 运行脚本
+# VoiceTyper v0.3.15 运行脚本
 
 # 激活conda环境
 source python-env.sh

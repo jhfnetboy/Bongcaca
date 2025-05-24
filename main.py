@@ -522,6 +522,10 @@ def main():
         term_program = os.environ.get('TERM_PROGRAM', 'Unknown')
         logger.info(f"当前运行环境: {term_program}, Bundle ID: {bundle_id}")
         
+        # 检查是否在打包应用中运行
+        is_packaged_app = '.app/Contents/MacOS/' in sys.executable
+        logger.info(f"运行模式: {'打包应用' if is_packaged_app else '开发环境'}")
+        
         # 先检查TCC数据库权限状态
         tcc_permitted = check_tcc_permission()
         logger.info(f"TCC数据库权限状态: {'已授权' if tcc_permitted else '未授权'}")
@@ -533,26 +537,40 @@ def main():
         if not mic_accessible:
             logger.warning("麦克风权限检查失败")
             
-            # 显示权限申请对话框，让用户选择操作
-            should_continue = show_permission_dialog()
-            
-            if should_continue:
-                # 尝试请求权限
-                logger.info("尝试申请麦克风权限...")
+            if is_packaged_app:
+                # 打包应用的权限处理更简单
+                logger.info("检测到打包应用，尝试触发系统权限对话框...")
                 if request_microphone_permission():
                     logger.info("麦克风权限申请成功")
                 else:
                     logger.error("麦克风权限申请失败")
-                    print("\n❌ 权限申请失败！")
-                    print("请按照以下步骤手动设置权限：")
-                    print("1. 打开 系统偏好设置 > 安全性与隐私 > 隐私")
-                    print("2. 选择 麦克风")
-                    print("3. 勾选 Terminal 或 Python")
-                    print("4. 重新运行程序")
+                    # 对于打包应用，提供更简单的错误信息
+                    print("\n❌ 需要麦克风权限！")
+                    print("请在系统弹出的权限对话框中点击'允许'，")
+                    print("或者前往 系统偏好设置 > 安全性与隐私 > 隐私 > 麦克风")
+                    print("手动勾选 VoiceTyper 应用")
                     return
             else:
-                logger.info("用户选择不继续，程序退出")
-                return
+                # 开发环境的权限处理
+                should_continue = show_permission_dialog()
+                
+                if should_continue:
+                    # 尝试请求权限
+                    logger.info("尝试申请麦克风权限...")
+                    if request_microphone_permission():
+                        logger.info("麦克风权限申请成功")
+                    else:
+                        logger.error("麦克风权限申请失败")
+                        print("\n❌ 权限申请失败！")
+                        print("请按照以下步骤手动设置权限：")
+                        print("1. 打开 系统偏好设置 > 安全性与隐私 > 隐私")
+                        print("2. 选择 麦克风")
+                        print("3. 勾选 Terminal 或 Python")
+                        print("4. 重新运行程序")
+                        return
+                else:
+                    logger.info("用户选择不继续，程序退出")
+                    return
         else:
             logger.info("麦克风权限检查通过")
     
