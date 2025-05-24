@@ -406,16 +406,16 @@ class WhisperEngine:
                 # 清理文本
                 transcript = transcript.strip()
                 
-                # 校验结果 - 放宽条件，允许更多内容通过
+                # 校验结果 - 返回真实的转写结果，不进行替换
                 if not transcript:
                     self.logger.warning("转写结果为空")
-                    return "未检测到语音内容，请确保麦克风正常工作并重试"
-                elif len(transcript) < 3:  # 如果结果太短，也可能是噪音
+                    return ""  # 返回空字符串，不添加兜底文案
+                elif len(transcript) < 3:  # 如果结果太短，仍然返回真实结果
                     self.logger.warning(f"转写结果过短: {transcript}")
-                    return "检测到音频但无法识别，请说话清晰一些"
+                    return transcript  # 返回真实的短结果
                 elif "感谢使用" in transcript or "广告" in transcript:
-                    self.logger.warning("转写结果包含广告内容")
-                    return "请说话..."
+                    self.logger.warning("转写结果包含广告内容，但仍返回真实结果")
+                    return transcript  # 返回真实结果，让用户判断
                 
                 self.logger.info(f"转写成功，结果长度: {len(transcript)}, 耗时: {transcribe_time:.2f}s")
                 return transcript
