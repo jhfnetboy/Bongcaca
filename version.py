@@ -1,4 +1,4 @@
-VERSION = "0.3.5"  # 修复虚拟环境和依赖配置
+VERSION = "0.3.6"  # 修复录音逻辑和参数传递错误
 
 def get_version():
-    return "0.3.5" 
+    return "0.3.6" 

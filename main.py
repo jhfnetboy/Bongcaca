@@ -376,7 +376,21 @@ def _start_recording(window, engine, recorder):
         # 启动录音线程
         logger.info(f"录音设置 - 模式: {mode}, 语言: {language}, 翻译目标: {target_language}")
         
-        success = recorder.start_recording(mode, language, target_language)
+        # 根据模式设置录音参数
+        realtime_mode = (mode == "realtime")
+        realtime_callback = None
+        if realtime_mode:
+            # 实时模式下设置回调函数
+            def on_audio_data(audio_data, level):
+                # 这里可以添加实时处理逻辑
+                window.update_audio_level(level)
+            realtime_callback = on_audio_data
+        
+        success = recorder.start_recording(
+            device_index=device_id, 
+            realtime_mode=realtime_mode, 
+            realtime_callback=realtime_callback
+        )
         if success:
             window.is_recording = True
             window.toggle_button.setText("⬜")  # 停止符号
@@ -546,6 +560,7 @@ def main():
         
         # 运行GUI应用
         from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QMetaObject, Qt, Q_ARG
         from ui.floating_window import FloatingWindow
         
         app = QApplication([])

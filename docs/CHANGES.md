@@ -437,3 +437,10 @@ https://huggingface.co/Systran/faster-distil-whisper-large-v3
 - 新增：创建部署文档(docs/deploy.md)，包含完整的环境设置和运行指南
 - 测试：验证程序能正常启动，模型加载成功，GUI界面正常显示
 
+## 2025-05-24 (0.3.6)
+- 修复：录音设备ID参数传递错误，解决"验证设备ID batch 失败"问题
+- 修复：start_recording方法参数不匹配，正确传递device_index、realtime_mode和realtime_callback参数
+- 修复：缺失QMetaObject导入导致的转写完成回调错误
+- 改进：重新整理所有文档到docs目录(CHANGES.md, README.md, context.md)
+- 测试：验证录音功能正常启动，音频配置成功，设备识别正确
+
