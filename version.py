@@ -1,4 +1,4 @@
-VERSION = "0.3.16"  # 完全修复打包应用权限申请，新增launcher和代码签名
+VERSION = "0.3.17"  # 修复空录音转写和构建错误，完善用户体验
 
 def get_version():
-    return "0.3.16" 
+    return "0.3.17" 
