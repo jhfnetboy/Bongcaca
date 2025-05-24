@@ -9,7 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.bongcaca.voicetyper</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>0.23.43</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.23.43</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
