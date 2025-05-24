@@ -62,10 +62,22 @@ All dependencies are listed in `requirements.txt`:
 ### Verification
 Run the following to verify installation:
 ```bash
+# Test core dependencies
 conda activate voice_typer
-python -c "import faster_whisper; print('Dependencies OK')"
+python -c "import faster_whisper, PySide6, pyaudio; print('✓ All dependencies imported successfully')"
+
+# Test application modules  
+python -c "from core.engine import WhisperEngine; from core.recorder import AudioRecorder; from ui.floating_window import FloatingWindow; print('✓ All core modules imported successfully')"
+
+# Test application launch
 python main.py  # Should start the application GUI
 ```
+
+## Version History
+
+- v0.3.7: 修复UI更新和音频电平显示问题
+- v0.3.6: 修复录音逻辑和参数传递错误  
+- v0.3.5: 修复虚拟环境和依赖配置
 
 ## Troubleshooting
 

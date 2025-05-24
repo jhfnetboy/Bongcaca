@@ -407,26 +407,35 @@ class AudioRecorder:
                         self.logger.debug(f"当前音频电平: {self.current_audio_level}%, 数据长度: {len(data)}")
                         time_since_last_level_log = 0
                     
-                    # 实时转写模式处理
-                    if self.realtime_mode and self.realtime_callback:
-                        # 将数据添加到实时帧缓冲区
-                        realtime_frames.append(data)
-                        
-                        # 更频繁地发送更新，每300毫秒一次
-                        current_time = time.time()
-                        if current_time - last_realtime_update >= realtime_interval:
-                            if realtime_frames:
-                                # 回调处理音频数据块，并传递当前音频电平
-                                self.realtime_callback(b''.join(realtime_frames), self.current_audio_level)
-                                
-                                # 清空实时帧缓冲区，保持较小的延迟
-                                realtime_frames = []
-                                
-                                # 更新时间戳
+                    # 回调处理（用于电平更新和实时转写）
+                    current_time = time.time()
+                    
+                    # 总是调用回调来更新电平（不论是否实时模式）
+                    if self.realtime_callback:
+                        # 实时模式下需要传递数据，非实时模式只需要传递电平
+                        if self.realtime_mode:
+                            # 将数据添加到实时帧缓冲区
+                            realtime_frames.append(data)
+                            
+                            # 更频繁地发送更新，每300毫秒一次
+                            if current_time - last_realtime_update >= realtime_interval:
+                                if realtime_frames:
+                                    # 回调处理音频数据块，并传递当前音频电平
+                                    self.realtime_callback(b''.join(realtime_frames), self.current_audio_level)
+                                    
+                                    # 清空实时帧缓冲区，保持较小的延迟
+                                    realtime_frames = []
+                                    
+                                    # 更新时间戳
+                                    last_realtime_update = current_time
+                                    
+                                    # 记录调试信息
+                                    self.logger.debug(f"发送实时音频数据块，音频电平: {self.current_audio_level}")
+                        else:
+                            # 非实时模式，只更新电平，每100ms一次
+                            if current_time - last_realtime_update >= 0.1:  # 每100ms更新一次电平
+                                self.realtime_callback(b'', self.current_audio_level)
                                 last_realtime_update = current_time
-                                
-                                # 记录调试信息
-                                self.logger.debug(f"发送实时音频数据块，音频电平: {self.current_audio_level}")
                                 
                 except IOError as e:
                     # 捕获常见的音频流错误并记录

@@ -9,6 +9,7 @@ import glob
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from PySide6.QtCore import QMetaObject, Qt, Q_ARG
 from utils.logging import setup_logging
 from utils.config import Config
 
@@ -379,12 +380,17 @@ def _start_recording(window, engine, recorder):
         # 根据模式设置录音参数
         realtime_mode = (mode == "realtime")
         realtime_callback = None
-        if realtime_mode:
-            # 实时模式下设置回调函数
-            def on_audio_data(audio_data, level):
-                # 这里可以添加实时处理逻辑
+        
+        # 设置音频电平更新回调（不管是否实时模式都需要）
+        def on_audio_data(audio_data, level):
+            # 直接调用update_audio_level方法，因为这个方法是线程安全的
+            try:
                 window.update_audio_level(level)
-            realtime_callback = on_audio_data
+            except Exception as e:
+                logger.warning(f"更新音频电平失败: {e}")
+        
+        # 不管什么模式都需要电平显示回调
+        realtime_callback = on_audio_data
         
         success = recorder.start_recording(
             device_index=device_id, 
@@ -392,23 +398,11 @@ def _start_recording(window, engine, recorder):
             realtime_callback=realtime_callback
         )
         if success:
-            window.is_recording = True
-            window.toggle_button.setText("⬜")  # 停止符号
-            window.toggle_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #ff4444;
-                    border: none;
-                    border-radius: 25px;
-                    font-size: 18px;
-                    color: white;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #cc3333;
-                }
-            """)
-            window.status_label.setText("正在录音...")
-            window.loading_label.hide()
+            # 使用window的更新方法来正确更新UI状态
+            window.update_recording_state(True)
+            window.update_status("正在录音...")
+            if hasattr(window, 'loading_label'):
+                window.loading_label.hide()
             logger.info("录音线程启动成功")
             
             # 播放开始录音提示音
@@ -422,8 +416,9 @@ def _start_recording(window, engine, recorder):
             threading.Thread(target=play_start_sound, daemon=True).start()
         else:
             logger.error("录音线程启动失败")
-            window.status_label.setText("录音启动失败")
-            window.loading_label.hide()
+            window.update_status("录音启动失败")
+            if hasattr(window, 'loading_label'):
+                window.loading_label.hide()
             
     except Exception as e:
         logger.error(f"启动录音出错: {e}")
@@ -435,23 +430,9 @@ def _stop_recording(window, engine, recorder):
     logger.debug("停止录音")
     logger.info("停止录音")
     
-    # 更新UI状态
-    window.is_recording = False
-    window.toggle_button.setText("▶")  # 播放符号
-    window.toggle_button.setStyleSheet("""
-        QPushButton {
-            background-color: #28a745;
-            border: none;
-            border-radius: 25px;
-            font-size: 18px;
-            color: white;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: #218838;
-        }
-    """)
-    window.status_label.setText("正在处理录音...")
+    # 更新UI状态  
+    window.update_recording_state(False)
+    window.update_status("正在处理录音...")
     
     # 停止录音
     recording_file = recorder.stop()
@@ -560,7 +541,6 @@ def main():
         
         # 运行GUI应用
         from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import QMetaObject, Qt, Q_ARG
         from ui.floating_window import FloatingWindow
         
         app = QApplication([])

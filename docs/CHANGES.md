@@ -444,3 +444,10 @@ https://huggingface.co/Systran/faster-distil-whisper-large-v3
 - 改进：重新整理所有文档到docs目录(CHANGES.md, README.md, context.md)
 - 测试：验证录音功能正常启动，音频配置成功，设备识别正确
 
+## 2025-05-24 (0.3.7)
+- 修复：QMetaObject导入范围问题，移动到文件顶部确保全局可访问
+- 修复：录音按钮状态更新问题，使用window.update_recording_state()方法正确更新UI
+- 修复：音频电平波形不显示问题，修复录音器回调机制确保电平数据正确传递
+- 改进：录音器回调逻辑，不论实时或批量模式都能正确更新音频电平
+- 改进：UI更新机制，使用统一的状态更新方法而非直接操作UI元素
+

@@ -13,11 +13,11 @@ conda activate voice_typer && python main.py
 
 所有详细文档请查看 [docs](docs/) 目录：
 
-- [部署指南](docs/deploy.md) - 环境设置和运行指南
+- [部署指南](docs/DEPLOY.md) - 环境设置和运行指南
 - [更新日志](docs/CHANGES.md) - 版本更新记录 
 - [详细说明](docs/README.md) - 完整功能说明
 - [发布记录](docs/RELEASE.md) - 版本发布历史
 
 ## 当前版本
 
-v0.3.6 - 修复录音逻辑和参数传递错误 
+v0.3.7 - 修复UI更新和音频电平显示问题 
